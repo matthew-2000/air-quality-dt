@@ -38,6 +38,12 @@ Python 3.11+ is required.
 python3 -m pip install -e .
 ```
 
+Alternatively, install from `requirements.txt`:
+
+```bash
+python3 -m pip install -r requirements.txt
+```
+
 or:
 
 ```bash
@@ -118,10 +124,9 @@ The dashboard title is:
 
 Sections:
 
-- Overview: explanation, data sources, and official-use disclaimer.
-- Map: virtual campus sensors and nearby ARPAC stations where coordinates exist.
-- Time series: pollutant and sensor selectors.
-- Scenario what-if: traffic reduction, wind multiplier, rain-event controls.
+- GIS operativo: layer OSM attivabili, sensori virtuali, stazioni ARPAC, timeline oraria e heatmap IDW sul campus.
+- Simulazione what-if: preset scenario, riduzione traffico, zona di intervento, verde aggiunto, vento, pioggia, mappa scenario e mappa delta.
+- Serie temporali: pollutant and sensor selectors.
 - Data quality: download/model metadata, row counts, station counts, schema warnings.
 
 ## Model
