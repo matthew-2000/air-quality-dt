@@ -4,6 +4,9 @@ This project is a first working prototype of an Urban Digital Twin for air quali
 
 It downloads public data where possible, prepares geospatial and time-series datasets, creates virtual campus sensors, estimates local air quality from nearby ARPAC stations plus simple weather and mobility proxies, and exposes an interactive Streamlit dashboard.
 
+For non-technical users, start from [docs/USER_GUIDE.md](docs/USER_GUIDE.md).
+For the model and GIS assumptions, read [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
+
 ## Why this is a Digital Twin MVP
 
 The MVP links a physical place (UNISA Fisciano campus) with a live-ish data representation:
@@ -127,6 +130,7 @@ Sections:
 - GIS operativo: layer OSM attivabili, sensori virtuali, stazioni ARPAC, timeline oraria e heatmap IDW sul campus.
 - Simulazione what-if: preset scenario, riduzione traffico, zona di intervento, verde aggiunto, vento, pioggia, mappa scenario e mappa delta.
 - Serie temporali: pollutant and sensor selectors.
+- Guida e metodologia: guida in linguaggio semplice, legenda, fonti dati, logica del modello e limiti.
 - Data quality: download/model metadata, row counts, station counts, schema warnings.
 
 ## Model

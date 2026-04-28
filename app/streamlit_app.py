@@ -37,6 +37,32 @@ st.markdown(
         background: rgba(42, 145, 95, 0.055);
     }
     .small-note {color: #5c625f; font-size: 0.88rem; line-height: 1.35;}
+    .guide-box {
+        border-left: 3px solid #2a915f;
+        padding: 0.7rem 0.9rem;
+        background: rgba(42, 145, 95, 0.065);
+        margin: 0.4rem 0 0.8rem 0;
+    }
+    .warning-box {
+        border-left: 3px solid #b95b42;
+        padding: 0.7rem 0.9rem;
+        background: rgba(185, 91, 66, 0.07);
+        margin: 0.4rem 0 0.8rem 0;
+    }
+    .legend-row {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin: 0.22rem 0;
+        font-size: 0.9rem;
+    }
+    .legend-swatch {
+        width: 1.15rem;
+        height: 0.72rem;
+        border-radius: 2px;
+        border: 1px solid rgba(0,0,0,0.16);
+        display: inline-block;
+    }
     .status-line {
         padding: 0.65rem 0;
         border-top: 1px solid rgba(49, 51, 63, 0.12);
@@ -205,32 +231,111 @@ def deck(layers: list[pdk.Layer], tooltip: dict) -> pdk.Deck:
     )
 
 
+def render_legend(delta: bool = False) -> None:
+    if delta:
+        rows = [
+            ("#2a915f", "miglioramento stimato"),
+            ("#efefdf", "variazione piccola"),
+            ("#c44844", "peggioramento stimato"),
+            ("#2346a5", "stazione ARPAC"),
+        ]
+    else:
+        rows = [
+            ("#2d845f", "valori più bassi"),
+            ("#f0b241", "valori intermedi"),
+            ("#c8493d", "valori più alti"),
+            ("#2346a5", "stazione ARPAC"),
+        ]
+    html = "".join(
+        f"<div class='legend-row'><span class='legend-swatch' style='background:{color}'></span>{label}</div>"
+        for color, label in rows
+    )
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def render_disclaimer() -> None:
+    st.markdown(
+        """
+        <div class="warning-box">
+        Questo prototipo non fornisce misure ufficiali e non sostituisce ARPAC.
+        Usalo per esplorare scenari e comprendere relazioni spaziali, non per decisioni sanitarie o regolatorie.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def format_zone(zone: str) -> str:
+    labels = {
+        "all": "tutto il campus",
+        "amministrazione": "amministrazione",
+        "didattica": "didattica",
+        "mobilita": "mobilità",
+        "parcheggio": "parcheggio",
+        "servizi": "servizi",
+        "studio": "studio",
+        "verde": "verde",
+    }
+    return labels.get(zone, zone)
+
+
 settings = load_settings()
 estimates, sensors, stations, schema_report, osm_layers = load_data()
 pollutants = sorted(estimates["pollutant"].dropna().unique()) if not estimates.empty else ["pm10"]
 
 with st.sidebar:
     st.header("Controlli GIS")
-    selected_pollutant = st.selectbox("Inquinante", pollutants, index=0)
+    st.caption("Scegli cosa osservare, poi leggi mappa e scenario come confronto tra alternative.")
+    selected_pollutant = st.selectbox(
+        "Inquinante",
+        pollutants,
+        index=0,
+        help="PM10 e PM2.5 sono polveri sottili. NO2 è spesso legato al traffico. O3 può crescere nelle ore calde e soleggiate.",
+    )
     timestamps = available_timestamps(estimates, selected_pollutant)
     timestamp_labels = [pd.Timestamp(ts).strftime("%Y-%m-%d %H:%M") for ts in timestamps]
     selected_label = st.select_slider(
         "Ora simulata",
         options=timestamp_labels,
         value=timestamp_labels[-1] if timestamp_labels else None,
+        help="Sposta il cursore per vedere come cambiano mappa e serie temporali nel tempo.",
     )
     selected_timestamp = pd.Timestamp(selected_label) if selected_label else pd.Timestamp.now().floor("h")
-    grid_resolution = st.slider("Risoluzione griglia", 14, 34, 24, step=2)
+    grid_resolution = st.slider(
+        "Risoluzione griglia",
+        14,
+        34,
+        24,
+        step=2,
+        help="Controlla il dettaglio della heatmap. Valori più alti sono più dettagliati ma possono essere più lenti.",
+    )
     st.divider()
+    st.caption("Layer mappa")
     layer_toggles = {
-        "heatmap": st.checkbox("Heatmap interpolata", value=True),
-        "sensors": st.checkbox("Sensori virtuali", value=True),
-        "stations": st.checkbox("Stazioni ARPAC", value=True),
-        "buildings": st.checkbox("Edifici", value=True),
-        "roads": st.checkbox("Strade", value=True),
-        "green": st.checkbox("Aree verdi", value=True),
-        "transport": st.checkbox("Trasporto pubblico", value=True),
-        "parking": st.checkbox("Parcheggi", value=True),
+        "heatmap": st.checkbox(
+            "Heatmap interpolata",
+            value=True,
+            help="Superficie stimata dai sensori virtuali. Non è una misura continua reale.",
+        ),
+        "sensors": st.checkbox(
+            "Sensori virtuali",
+            value=True,
+            help="Punti simulati su luoghi rilevanti del campus.",
+        ),
+        "stations": st.checkbox(
+            "Stazioni ARPAC",
+            value=True,
+            help="Stazioni ufficiali disponibili nei dati ARPAC, quando hanno coordinate.",
+        ),
+        "buildings": st.checkbox("Edifici", value=True, help="Edifici da OpenStreetMap."),
+        "roads": st.checkbox("Strade", value=True, help="Rete stradale da OpenStreetMap."),
+        "green": st.checkbox("Aree verdi", value=True, help="Aree verdi e naturali da OpenStreetMap."),
+        "transport": st.checkbox(
+            "Trasporto pubblico",
+            value=True,
+            help="Fermate o punti di trasporto pubblico disponibili in OpenStreetMap.",
+        ),
+        "parking": st.checkbox("Parcheggi", value=True, help="Aree parcheggio disponibili in OpenStreetMap."),
     }
 
 snapshot = sensor_snapshot(estimates, selected_pollutant, selected_timestamp)
@@ -247,8 +352,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-tab_gis, tab_scenario, tab_timeseries, tab_quality = st.tabs(
-    ["GIS operativo", "Simulazione what-if", "Serie temporali", "Qualita dati"]
+tab_gis, tab_scenario, tab_timeseries, tab_guide, tab_quality = st.tabs(
+    ["GIS operativo", "Simulazione what-if", "Serie temporali", "Guida e metodologia", "Qualità dati"]
 )
 
 with tab_gis:
@@ -262,6 +367,17 @@ with tab_gis:
             "<p class='small-note'>La superficie continua e ottenuta con interpolazione IDW sui sensori virtuali del campus.</p>",
             unsafe_allow_html=True,
         )
+        st.subheader("Legenda")
+        render_legend(delta=False)
+        with st.expander("Come leggere questa mappa"):
+            st.write(
+                "La mappa mostra una stima dimostrativa per l'ora selezionata. "
+                "I colori aiutano a confrontare zone del campus: non rappresentano misure ufficiali punto-per-punto."
+            )
+            st.write(
+                "I sensori virtuali sono i punti più importanti da leggere. "
+                "La heatmap riempie lo spazio tra questi punti con una interpolazione semplice."
+            )
     with left:
         if snapshot.empty:
             st.warning("Nessun dato disponibile per l'ora selezionata.")
@@ -303,6 +419,15 @@ with tab_gis:
             )
 
 with tab_scenario:
+    st.markdown(
+        """
+        <div class="guide-box">
+        Scegli un preset o modifica i controlli. La mappa Delta è la vista più importante:
+        valori negativi indicano un miglioramento stimato rispetto alla baseline.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     preset = st.selectbox(
         "Preset scenario",
         [
@@ -312,6 +437,7 @@ with tab_scenario:
             "Vento forte",
             "Campus green mobility",
         ],
+        help="I preset sono esempi narrativi. Puoi sempre modificarli con gli slider sotto.",
     )
     preset_values = {
         "Personalizzato": (0.2, 1.0, False, "all", 0.0),
@@ -322,15 +448,42 @@ with tab_scenario:
     }
     default_traffic, default_wind, default_rain, default_zone, default_green = preset_values[preset]
     control_a, control_b, control_c, control_d = st.columns(4)
-    traffic_reduction = control_a.slider("Riduzione traffico", 0, 50, int(default_traffic * 100), step=5) / 100
-    wind_multiplier = control_b.slider("Moltiplicatore vento", 0.5, 2.0, float(default_wind), step=0.1)
+    traffic_reduction = control_a.slider(
+        "Riduzione traffico",
+        0,
+        50,
+        int(default_traffic * 100),
+        step=5,
+        help="Percentuale ipotetica di riduzione del contributo traffico nel modello.",
+    ) / 100
+    wind_multiplier = control_b.slider(
+        "Moltiplicatore vento",
+        0.5,
+        2.0,
+        float(default_wind),
+        step=0.1,
+        help="Valori maggiori simulano vento più forte. Nel modello il vento disperde PM e NO2.",
+    )
     focus_zone = control_c.selectbox(
         "Zona intervento",
         zones,
         index=zones.index(default_zone) if default_zone in zones else 0,
+        format_func=format_zone,
+        help="Applica l'intervento soprattutto a una zona del campus. 'all' applica lo scenario ovunque.",
     )
-    green_improvement = control_d.slider("Verde aggiunto", 0, 50, int(default_green * 100), step=5) / 100
-    rain_event = st.toggle("Evento di pioggia", value=default_rain)
+    green_improvement = control_d.slider(
+        "Verde aggiunto",
+        0,
+        50,
+        int(default_green * 100),
+        step=5,
+        help="Proxy semplificato: aumenta l'effetto mitigante associato alle aree verdi.",
+    ) / 100
+    rain_event = st.toggle(
+        "Evento di pioggia",
+        value=default_rain,
+        help="Nel MVP la pioggia riduce soprattutto PM10 e PM2.5.",
+    )
 
     scenario_snapshot = apply_scenario(
         snapshot,
@@ -380,6 +533,7 @@ with tab_scenario:
             )
         with map_b:
             st.subheader("Delta")
+            render_legend(delta=True)
             delta_layers = build_base_layers(osm_layers, layer_toggles)
             if layer_toggles["heatmap"] and not delta_grid.empty:
                 delta_layers.append(grid_layer(delta_grid, "delta_value"))
@@ -423,6 +577,16 @@ with tab_scenario:
             width="stretch",
             hide_index=True,
         )
+        with st.expander("Come interpretare lo scenario"):
+            st.write(
+                "La baseline è il valore stimato prima dello scenario. "
+                "Lo scenario è il valore dopo le modifiche ipotetiche. "
+                "Il delta è scenario meno baseline."
+            )
+            st.write(
+                "Un delta negativo indica riduzione stimata dell'inquinante; "
+                "un delta positivo indica aumento stimato. Il risultato serve a confrontare alternative, non a certificare un effetto reale."
+            )
 
 with tab_timeseries:
     sensor_names = sorted(estimates["sensor_name"].dropna().unique()) if not estimates.empty else []
@@ -436,8 +600,73 @@ with tab_timeseries:
         fig.update_layout(yaxis_title=f"{selected_pollutant.upper()} stimato", xaxis_title="Ora")
         st.plotly_chart(fig, width="stretch")
 
+with tab_guide:
+    render_disclaimer()
+    st.subheader("Percorso consigliato")
+    step_a, step_b, step_c = st.columns(3)
+    with step_a:
+        st.markdown("**1. Osserva**")
+        st.write("Scegli inquinante e ora dalla barra laterale, poi guarda sensori e heatmap.")
+    with step_b:
+        st.markdown("**2. Simula**")
+        st.write("Apri un preset what-if e modifica traffico, vento, pioggia o zona.")
+    with step_c:
+        st.markdown("**3. Confronta**")
+        st.write("Leggi la mappa Delta: verde significa miglioramento stimato, rosso peggioramento stimato.")
+
+    st.subheader("Concetti chiave")
+    with st.expander("Cos'è un Digital Twin in questo MVP?", expanded=True):
+        st.write(
+            "È una rappresentazione digitale del campus che unisce dati ambientali, mappe GIS, "
+            "sensori virtuali e scenari. In questo MVP non replica tutta la fisica atmosferica: "
+            "serve a esplorare dati, luoghi e ipotesi in modo interattivo."
+        )
+    with st.expander("Cosa sono i sensori virtuali?"):
+        st.write(
+            "Sono punti simulati collocati in aree riconoscibili del campus, come terminal bus, parcheggio, mensa e area verde. "
+            "Non sono strumenti fisici. Servono a costruire una prima griglia di osservazione locale."
+        )
+    with st.expander("Cosa significa heatmap?"):
+        st.write(
+            "La heatmap colora una superficie continua sul campus. Viene calcolata interpolando i valori dei sensori virtuali. "
+            "Aiuta a vedere pattern spaziali, ma non è una misura diretta in ogni punto della mappa."
+        )
+    with st.expander("Cosa significa delta?"):
+        st.write(
+            "Il delta è la differenza tra scenario e baseline. Se il delta è negativo, lo scenario riduce il valore stimato. "
+            "Se è positivo, lo aumenta."
+        )
+
+    st.subheader("Metodo in breve")
+    st.markdown(
+        """
+        ```text
+        valore stimato =
+            base ARPAC interpolata
+            + effetto traffico
+            - effetto verde
+            + effetto meteo
+        ```
+        """
+    )
+    method_a, method_b = st.columns(2)
+    with method_a:
+        st.markdown("**Fonti dati**")
+        st.write("ARPAC fornisce i dati ufficiali regionali. Open-Meteo fornisce il meteo quando UNISA non espone un endpoint stabile. OpenStreetMap fornisce layer GIS.")
+        st.markdown("**IDW**")
+        st.write("L'interpolazione IDW assegna più peso ai punti vicini e meno peso a quelli lontani.")
+    with method_b:
+        st.markdown("**Scenario what-if**")
+        st.write("Gli slider non cambiano dati reali: modificano componenti del modello per confrontare alternative.")
+        st.markdown("**Limite principale**")
+        st.write("Il traffico è un proxy orario, non un conteggio reale di veicoli o persone.")
+
+    st.subheader("Documentazione")
+    st.write("Guida utente: `docs/USER_GUIDE.md`")
+    st.write("Metodologia tecnica: `docs/METHODOLOGY.md`")
+
 with tab_quality:
-    st.subheader("Qualita e provenienza dati")
+    st.subheader("Qualità e provenienza dati")
     if estimates.empty:
         st.warning("Nessun dataset stimato caricato.")
     else:
