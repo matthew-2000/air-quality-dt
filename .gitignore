@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+cache/
+*.egg-info/
+*.pyc
+.DS_Store
+data/raw/arpac/*
+data/raw/weather/*
+data/raw/osm/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
