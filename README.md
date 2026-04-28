@@ -16,6 +16,7 @@ The MVP links a physical place (UNISA Fisciano campus) with a live-ish data repr
 - weather from the UNISA weather page when discoverable, otherwise Open-Meteo fallback;
 - virtual sensors placed around meaningful campus zones;
 - a transparent estimation model and scenario controls.
+- open-data validation against ARPAC stations and explicit uncertainty labels.
 
 It is intentionally simple: no Kubernetes, no microservices, no PostGIS, no game engine, and no complex 3D.
 
@@ -110,6 +111,8 @@ Processed outputs are written under `data/processed/`:
 - `campus_zones.geojson`
 - `digital_twin_entities.json`
 - `campus_air_quality_estimates.parquet`
+- `model_validation.parquet`
+- `model_validation_summary.json`
 - `schema_report.json` when schema warnings occur
 
 All processed tables include provenance fields where applicable:
@@ -150,6 +153,18 @@ estimated_value =
 
 Traffic, green, wind, and rain coefficients are configured in `config/settings.yaml`.
 
+## Open-data validation
+
+Because the project cannot assume physical campus sensors or closed datasets, model quality is checked with a leave-one-station-out validation on recent ARPAC open data:
+
+1. one ARPAC station is temporarily held out;
+2. its pollutant value is reconstructed from the other available ARPAC stations with IDW;
+3. observed and predicted values are compared with MAE, bias, and p90 absolute error.
+
+Campus estimates also include `uncertainty_score`, `confidence_label`, `nearest_station_km`, and station-count fields so the dashboard can show where estimates are more or less supported by open observations.
+
+The validation window is controlled by `validation.max_hours` in `config/settings.yaml`. Pollutant values outside the configured physical sanity range are treated as missing before modeling and validation, so numeric missing-data flags do not distort the metrics.
+
 ## Limitations
 
 This is a demonstrative MVP, not an official health or regulatory model. It does not replace ARPAC measurements. Virtual sensor coordinates are synthetic unless explicitly improved later. Weather fallback uses Open-Meteo when the UNISA page does not expose a reliable machine-readable endpoint. The atmospheric model is intentionally simple and should be validated before any scientific or operational use.
@@ -158,6 +173,7 @@ This is a demonstrative MVP, not an official health or regulatory model. It does
 
 - Add real low-cost sensors on campus.
 - Validate estimates against ARPAC observations.
+- Improve open-data validation and uncertainty calibration.
 - Add MQTT ingestion for streaming sensor data.
 - Add an NGSI-LD-compatible entity model.
 - Use PostGIS/TimescaleDB later when the prototype grows.

@@ -131,7 +131,13 @@ Questa sezione mostra:
 - numero di stazioni;
 - ultimo aggiornamento;
 - eventuale uso di dati sintetici fallback;
+- distribuzione della confidenza delle stime;
+- validazione open-data del modello contro stazioni ARPAC;
 - avvisi di schema o provenienza.
+
+La validazione open-data funziona così: il sistema nasconde temporaneamente una stazione ARPAC, prova a ricostruirne il valore dalle altre stazioni e misura l'errore. Non sostituisce sensori reali nel campus, ma rende il modello più controllabile usando solo dati aperti.
+
+Se nei file ARPAC compaiono valori numerici anomali usati come flag di dato mancante, la pipeline li esclude prima di calcolare stime e validazione.
 
 ## Esempi guidati
 

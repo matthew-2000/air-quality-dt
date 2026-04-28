@@ -173,6 +173,40 @@ Il layer di affidabilità è dimostrativo. Viene calcolato in base alla distanza
 
 Non rappresenta incertezza scientifica completa, ma aiuta l'utente a capire dove la simulazione è più o meno supportata dai punti disponibili.
 
+## Validazione solo con dati open
+
+Se non sono disponibili sensori fisici nel campus e non si possono usare dati chiusi, il controllo di qualità più difendibile è una validazione interna sui dati ARPAC open.
+
+Il progetto usa una procedura **leave-one-station-out** sulle ore recenti disponibili:
+
+1. per ogni ora e inquinante si selezionano le stazioni ARPAC con valore e coordinate;
+2. una stazione viene esclusa temporaneamente;
+3. il valore della stazione esclusa viene stimato usando le altre stazioni con IDW;
+4. la stima viene confrontata con il valore osservato.
+
+Il report `model_validation_summary.json` espone:
+
+- MAE medio;
+- bias medio;
+- errore assoluto al percentile 90;
+- metriche aggregate per inquinante.
+
+Questa validazione non dimostra che il valore dentro il campus sia esatto, perché non esiste una misura campus reale da confrontare. Però misura quanto il metodo IDW riesce a ricostruire stazioni ARPAC note partendo da altre stazioni ARPAC, usando solo dati aperti.
+
+Per mantenere il calcolo praticabile nella pipeline, la validazione usa per default le ultime ore disponibili configurate in `validation.max_hours`. I valori fuori da un intervallo fisicamente plausibile, per esempio flag numerici molto alti, vengono trattati come mancanti prima del modello e della validazione.
+
+## Incertezza delle stime
+
+Ogni stima campus include anche:
+
+- numero di stazioni usate;
+- distanza dalla stazione ARPAC più vicina;
+- distanza media dalle stazioni;
+- `uncertainty_score`;
+- `confidence_label`.
+
+L'incertezza aumenta quando le stazioni sono poche, lontane o quando il sistema deve usare fallback sintetici. È un indicatore operativo e trasparente, non un intervallo di confidenza regolatorio.
+
 ## Human-centered design
 
 Le scelte di interfaccia seguono alcuni principi:
@@ -193,3 +227,4 @@ Le scelte di interfaccia seguono alcuni principi:
 - Il traffico è un proxy orario, non un dato misurato.
 - Le relazioni meteo-inquinanti sono semplificate.
 - Non è un modello sanitario, normativo o regolatorio.
+- La validazione usa stazioni ARPAC, non sensori reali nel campus.

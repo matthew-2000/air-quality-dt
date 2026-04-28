@@ -139,6 +139,34 @@ def _station_observations_with_distances(settings: Settings, observations: pd.Da
     return merged
 
 
+def _confidence_label(uncertainty_score: float) -> str:
+    if uncertainty_score <= 0.33:
+        return "alta"
+    if uncertainty_score <= 0.66:
+        return "media"
+    return "bassa"
+
+
+def estimate_spatial_uncertainty(
+    distances_km: list[float],
+    station_count: int,
+    is_synthetic: bool = False,
+    radius_km: float = 40.0,
+) -> tuple[float, str]:
+    usable_distances = [float(distance) for distance in distances_km if pd.notna(distance)]
+    if not usable_distances or station_count <= 0:
+        return 1.0, "bassa"
+    nearest_km = min(usable_distances)
+    mean_km = sum(usable_distances) / len(usable_distances)
+    distance_penalty = min(nearest_km / max(radius_km / 2, 1.0), 1.0)
+    spread_penalty = min(mean_km / max(radius_km, 1.0), 1.0)
+    density_penalty = max(0.0, 1.0 - min(station_count, 5) / 5)
+    synthetic_penalty = 0.25 if is_synthetic else 0.0
+    score = min(1.0, 0.45 * distance_penalty + 0.25 * spread_penalty + 0.20 * density_penalty + synthetic_penalty)
+    score = round(float(score), 3)
+    return score, _confidence_label(score)
+
+
 def estimate_campus_air_quality(settings: Settings) -> pd.DataFrame:
     sensors = _load_sensors(settings)
     observations = _load_observations(settings)
@@ -186,6 +214,18 @@ def estimate_campus_air_quality(settings: Settings) -> pd.DataFrame:
                 weather_component = _weather_adjustment(pollutant, wind_speed, precipitation, ts, settings)
                 estimated_value = max(0.0, base_value + traffic_component - green_component + weather_component)
                 is_synthetic = bool(hour_obs.get("is_synthetic", pd.Series([False])).fillna(False).any())
+                station_count = int(len(values))
+                valid_distances = [float(distance) for distance in distances if pd.notna(distance)]
+                nearest_station_km = min(valid_distances) if valid_distances else float("nan")
+                mean_station_distance_km = (
+                    sum(valid_distances) / len(valid_distances) if valid_distances else float("nan")
+                )
+                uncertainty_score, confidence_label = estimate_spatial_uncertainty(
+                    valid_distances,
+                    station_count,
+                    is_synthetic=is_synthetic,
+                    radius_km=float(settings.arpac.get("station_radius_km", 40)),
+                )
                 source = "idw_model_synthetic_fallback" if is_synthetic else "arpac_idw_model"
                 rows.append(
                     {
@@ -205,6 +245,11 @@ def estimate_campus_air_quality(settings: Settings) -> pd.DataFrame:
                         "traffic_component": round(traffic_component, 3),
                         "green_component": round(green_component, 3),
                         "weather_component": round(weather_component, 3),
+                        "station_count": station_count,
+                        "nearest_station_km": round(float(nearest_station_km), 3),
+                        "mean_station_distance_km": round(float(mean_station_distance_km), 3),
+                        "uncertainty_score": uncertainty_score,
+                        "confidence_label": confidence_label,
                         "source": source,
                         "source_url": "https://dati.arpacampania.it/",
                         "downloaded_at": utc_now_iso(),

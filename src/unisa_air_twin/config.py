@@ -16,6 +16,7 @@ class Settings(BaseModel):
     arpac: dict[str, Any]
     weather: dict[str, Any]
     model: dict[str, Any]
+    validation: dict[str, Any] = Field(default_factory=dict)
 
     raw_dir: Path = Field(default_factory=lambda: project_path("data/raw"))
     processed_dir: Path = Field(default_factory=lambda: project_path("data/processed"))
@@ -28,4 +29,3 @@ def load_settings(path: str | Path | None = None) -> Settings:
     settings.raw_dir = project_path(settings.paths["raw_dir"])
     settings.processed_dir = project_path(settings.paths["processed_dir"])
     return settings
-

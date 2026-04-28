@@ -11,6 +11,7 @@ from unisa_air_twin.config import load_settings
 from unisa_air_twin.model import estimate_campus_air_quality
 from unisa_air_twin.osm import download_osm
 from unisa_air_twin.sensors import create_virtual_sensors
+from unisa_air_twin.validation import leave_one_station_out_validation
 from unisa_air_twin.weather import download_weather
 from unisa_air_twin.zones import ensure_twin_layers
 
@@ -30,12 +31,15 @@ def main() -> None:
     download_osm(settings, force=args.force)
     create_virtual_sensors(settings)
     ensure_twin_layers(settings)
-    print("4/5 Cleaning ARPAC datasets...")
+    print("4/6 Cleaning ARPAC datasets...")
     observations = clean_air_quality(settings)
     print(f"   Air-quality rows available: {len(observations):,}")
-    print("5/5 Estimating campus air quality...")
+    print("5/6 Estimating campus air quality...")
     estimates = estimate_campus_air_quality(settings)
     print(f"   Campus estimate rows available: {len(estimates):,}")
+    print("6/6 Validating open-data model against ARPAC stations...")
+    validation = leave_one_station_out_validation(settings)
+    print(f"   Validation rows available: {len(validation):,}")
     print("Pipeline complete. Run: streamlit run app/streamlit_app.py")
 
 

@@ -8,15 +8,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from unisa_air_twin.arpac import clean_air_quality
 from unisa_air_twin.config import load_settings
 from unisa_air_twin.model import estimate_campus_air_quality
+from unisa_air_twin.validation import leave_one_station_out_validation
 
 
 def main() -> None:
     settings = load_settings()
     clean_air_quality(settings)
     estimates = estimate_campus_air_quality(settings)
+    validation = leave_one_station_out_validation(settings)
     print(f"Created {len(estimates):,} campus air-quality estimate rows.")
+    print(f"Created {len(validation):,} open-data validation rows.")
 
 
 if __name__ == "__main__":
     main()
-

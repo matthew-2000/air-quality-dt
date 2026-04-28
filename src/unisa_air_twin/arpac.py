@@ -49,6 +49,12 @@ POLLUTANT_CANDIDATES = {
     "no2": ["no2", "biossido_di_azoto"],
     "o3": ["o3", "ozono"],
 }
+POLLUTANT_VALID_RANGES = {
+    "pm10": (0.0, 500.0),
+    "pm25": (0.0, 500.0),
+    "no2": (0.0, 500.0),
+    "o3": (0.0, 500.0),
+}
 LONG_POLLUTANT_CANDIDATES = ["inquinante", "pollutant", "parametro", "codice_inquinante"]
 LONG_VALUE_CANDIDATES = ["valore", "value", "concentrazione", "misura", "media"]
 
@@ -209,7 +215,9 @@ def download_arpac(settings: Settings, force: bool = False, months: int | None =
 
 
 def _parse_timestamp(df: pd.DataFrame, timestamp_col: str) -> pd.Series:
-    timestamps = pd.to_datetime(df[timestamp_col], errors="coerce", dayfirst=True, utc=True)
+    raw_values = df[timestamp_col].astype(str)
+    iso_like = raw_values.str.match(r"^\d{4}-\d{2}-\d{2}").mean() > 0.5
+    timestamps = pd.to_datetime(df[timestamp_col], errors="coerce", dayfirst=not iso_like, utc=True)
     if timestamps.notna().any():
         return timestamps.dt.tz_convert(None)
     timestamps = pd.to_datetime(df[timestamp_col], errors="coerce", utc=True)
@@ -283,6 +291,10 @@ def _clean_single_observation_file(path: Path, source_url: str | None = None) ->
     for column in keep:
         if column not in cleaned.columns:
             cleaned[column] = pd.NA
+    for pollutant, (low, high) in POLLUTANT_VALID_RANGES.items():
+        if pollutant in cleaned.columns:
+            values = pd.to_numeric(cleaned[pollutant], errors="coerce")
+            cleaned[pollutant] = values.where(values.between(low, high))
     return cleaned[keep], warnings
 
 
@@ -336,13 +348,40 @@ def synthetic_air_quality_observations() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _read_station_metadata_file(path: Path) -> pd.DataFrame:
+    raw_text = path.read_text(encoding="utf-8", errors="replace")
+    lines = [line for line in raw_text.splitlines() if line.strip()]
+    if not lines:
+        return pd.DataFrame()
+    header = lines[0].split(",")
+    if "Codice Europeo" not in header or "Latitudine" not in header or "Longitudine" not in header:
+        return normalize_columns(read_csv_flexible(path))
+    expected_columns = len(header)
+    fixed_prefix_columns = 7
+    fixed_suffix_columns = expected_columns - fixed_prefix_columns - 1
+    rows: list[list[str]] = []
+    for line in lines[1:]:
+        parts = line.split(",")
+        if len(parts) < expected_columns:
+            continue
+        prefix = parts[:fixed_prefix_columns]
+        address = ",".join(parts[fixed_prefix_columns : len(parts) - fixed_suffix_columns]).strip()
+        suffix = parts[-fixed_suffix_columns:]
+        rows.append([*prefix, address, *suffix])
+    return normalize_columns(pd.DataFrame(rows, columns=header))
+
+
+def _coordinate_series(raw: pd.DataFrame, column: str) -> pd.Series:
+    return pd.to_numeric(raw[column].astype(str).str.replace(",", ".", regex=False), errors="coerce")
+
+
 def clean_station_metadata(settings: Settings) -> pd.DataFrame:
     raw_dir = settings.raw_dir / "arpac"
     metadata_files = sorted(raw_dir.glob("*station*.csv")) + sorted(raw_dir.glob("*stazioni*.csv")) + sorted(raw_dir.glob("*metadata*.csv"))
     warnings: list[dict] = []
     for path in metadata_files:
         try:
-            raw = normalize_columns(read_csv_flexible(path))
+            raw = _read_station_metadata_file(path)
         except Exception as exc:
             warnings.append({"file": str(path), "warning": f"Could not read station metadata: {exc}"})
             continue
@@ -362,18 +401,21 @@ def clean_station_metadata(settings: Settings) -> pd.DataFrame:
                 }
             )
             continue
+        lat = _coordinate_series(raw, lat_col)
+        lon = _coordinate_series(raw, lon_col)
         df = pd.DataFrame(
             {
                 "station_id": raw[station_col].astype(str).str.strip(),
                 "station_name": raw[name_col].astype(str).str.strip() if name_col else raw[station_col].astype(str),
-                "lat": pd.to_numeric(raw[lat_col].astype(str).str.replace(",", ".", regex=False), errors="coerce"),
-                "lon": pd.to_numeric(raw[lon_col].astype(str).str.replace(",", ".", regex=False), errors="coerce"),
+                "lat": lat,
+                "lon": lon,
                 "source": "arpac",
                 "source_url": settings.arpac["station_metadata_url"],
                 "downloaded_at": utc_now_iso(),
                 "is_synthetic": False,
             }
         ).dropna(subset=["lat", "lon"])
+        df = df[df["lat"].between(39.0, 42.5) & df["lon"].between(13.0, 16.5)]
         if not df.empty:
             return df
     if warnings:

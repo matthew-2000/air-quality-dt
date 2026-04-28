@@ -30,6 +30,7 @@ from unisa_air_twin.scenario import apply_scenario, scenario_summary
 from unisa_air_twin.sensors import create_virtual_sensors
 from unisa_air_twin.storage import geojson_points_to_frame, read_geojson, read_table
 from unisa_air_twin.utils import read_json
+from unisa_air_twin.validation import leave_one_station_out_validation
 from unisa_air_twin.zones import ensure_twin_layers
 
 st.set_page_config(page_title="UNISA Air Quality Digital Twin - MVP", layout="wide")
@@ -83,7 +84,7 @@ st.markdown(
 
 
 @st.cache_data(show_spinner=False)
-def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict, dict[str, dict], dict, dict]:
+def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict, dict[str, dict], dict, dict, pd.DataFrame, dict]:
     settings = load_settings()
     sensors = geojson_points_to_frame(settings.processed_dir / "campus_virtual_sensors.geojson")
     if sensors.empty:
@@ -106,6 +107,17 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict, dict[st
     }
     zones_geojson = read_geojson(settings.processed_dir / "campus_zones.geojson")
     entities = read_json(settings.processed_dir / "digital_twin_entities.json", default={"entities": []})
+    validation = read_table(settings.processed_dir / "model_validation.parquet")
+    validation_summary = read_json(
+        settings.processed_dir / "model_validation_summary.json",
+        default={"rows": 0, "overall": {"mae": None, "bias": None}, "by_pollutant": []},
+    )
+    if validation.empty and not estimates.empty and not stations.empty:
+        validation = leave_one_station_out_validation(settings)
+        validation_summary = read_json(
+            settings.processed_dir / "model_validation_summary.json",
+            default={"rows": 0, "overall": {"mae": None, "bias": None}, "by_pollutant": []},
+        )
     return (
         estimates,
         sensors,
@@ -114,6 +126,8 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict, dict[st
         layers,
         zones_geojson,
         entities if isinstance(entities, dict) else {"entities": []},
+        validation,
+        validation_summary if isinstance(validation_summary, dict) else {"rows": 0, "by_pollutant": []},
     )
 
 
@@ -325,7 +339,7 @@ def format_zone(zone: str) -> str:
 
 
 settings = load_settings()
-estimates, sensors, stations, schema_report, osm_layers, zones_geojson, twin_entities = load_data()
+estimates, sensors, stations, schema_report, osm_layers, zones_geojson, twin_entities, validation, validation_summary = load_data()
 pollutants = sorted(estimates["pollutant"].dropna().unique()) if not estimates.empty else ["pm10"]
 
 with st.sidebar:
@@ -425,6 +439,8 @@ with tab_gis:
             st.metric("Media sensori", f"{snapshot['estimated_value'].mean():.1f}")
             st.metric("Massimo", f"{snapshot['estimated_value'].max():.1f}")
             st.metric("Minimo", f"{snapshot['estimated_value'].min():.1f}")
+            if "uncertainty_score" in snapshot.columns:
+                st.metric("Incertezza media", f"{snapshot['uncertainty_score'].mean():.2f}")
         st.markdown(
             "<p class='small-note'>La superficie continua e ottenuta con interpolazione IDW sui sensori virtuali del campus.</p>",
             unsafe_allow_html=True,
@@ -480,6 +496,8 @@ with tab_gis:
                         "green_index",
                         "wind_speed_10m",
                         "precipitation",
+                        "confidence_label",
+                        "nearest_station_km",
                     ]
                 ].sort_values("estimated_value", ascending=False),
                 width="stretch",
@@ -751,6 +769,8 @@ with tab_scenario:
                         "delta",
                         "traffic_index",
                         "green_index",
+                        "confidence_label",
+                        "uncertainty_score",
                     ]
                 ].sort_values("delta"),
                 width="stretch",
@@ -948,6 +968,35 @@ with tab_quality:
         st.write("Ultimo download/modello:", estimates["downloaded_at"].max())
         synthetic_share = estimates["is_synthetic"].fillna(False).mean() * 100
         st.write(f"Quota righe basate su fallback sintetico: {synthetic_share:.1f}%")
+        if "confidence_label" in estimates.columns:
+            st.write("Distribuzione confidenza stime")
+            st.dataframe(
+                estimates["confidence_label"]
+                .fillna("non disponibile")
+                .value_counts()
+                .rename_axis("confidenza")
+                .reset_index(name="righe"),
+                width="stretch",
+                hide_index=True,
+            )
+    st.subheader("Validazione open-data")
+    validation_rows = int(validation_summary.get("rows", 0) or 0)
+    if validation_rows:
+        overall = validation_summary.get("overall", {})
+        val_a, val_b, val_c = st.columns(3)
+        val_a.metric("Righe validazione", f"{validation_rows:,}")
+        val_b.metric("MAE medio", f"{overall.get('mae'):.2f}" if overall.get("mae") is not None else "n/d")
+        val_c.metric("Bias medio", f"{overall.get('bias'):+.2f}" if overall.get("bias") is not None else "n/d")
+        by_pollutant = pd.DataFrame(validation_summary.get("by_pollutant", []))
+        if not by_pollutant.empty:
+            st.dataframe(by_pollutant, width="stretch", hide_index=True)
+        with st.expander("Metodo di validazione"):
+            st.write(
+                "La validazione usa solo dati ARPAC open: per ogni ora e inquinante, una stazione viene esclusa, "
+                "il valore viene ricostruito dalle altre stazioni con IDW e poi confrontato con il valore osservato."
+            )
+    else:
+        st.info("Validazione non disponibile: servono almeno due stazioni ARPAC con coordinate e valori nello stesso orario.")
     warnings = schema_report.get("warnings", [])
     if warnings:
         st.write("Avvisi schema/provenienza")
