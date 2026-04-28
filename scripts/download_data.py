@@ -11,6 +11,7 @@ from unisa_air_twin.config import load_settings
 from unisa_air_twin.osm import download_osm
 from unisa_air_twin.sensors import create_virtual_sensors
 from unisa_air_twin.weather import download_weather
+from unisa_air_twin.zones import ensure_twin_layers
 
 
 def main() -> None:
@@ -24,6 +25,7 @@ def main() -> None:
     download_weather(settings, force=args.force)
     download_osm(settings, force=args.force)
     create_virtual_sensors(settings)
+    ensure_twin_layers(settings)
 
 
 if __name__ == "__main__":

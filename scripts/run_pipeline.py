@@ -12,6 +12,7 @@ from unisa_air_twin.model import estimate_campus_air_quality
 from unisa_air_twin.osm import download_osm
 from unisa_air_twin.sensors import create_virtual_sensors
 from unisa_air_twin.weather import download_weather
+from unisa_air_twin.zones import ensure_twin_layers
 
 
 def main() -> None:
@@ -28,6 +29,7 @@ def main() -> None:
     print("3/5 Downloading OSM campus layers and creating virtual sensors...")
     download_osm(settings, force=args.force)
     create_virtual_sensors(settings)
+    ensure_twin_layers(settings)
     print("4/5 Cleaning ARPAC datasets...")
     observations = clean_air_quality(settings)
     print(f"   Air-quality rows available: {len(observations):,}")

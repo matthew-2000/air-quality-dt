@@ -107,6 +107,8 @@ Processed outputs are written under `data/processed/`:
 - `campus_transport.geojson`
 - `campus_parking.geojson`
 - `campus_virtual_sensors.geojson`
+- `campus_zones.geojson`
+- `digital_twin_entities.json`
 - `campus_air_quality_estimates.parquet`
 - `schema_report.json` when schema warnings occur
 
@@ -128,7 +130,8 @@ The dashboard title is:
 Sections:
 
 - GIS operativo: layer OSM attivabili, sensori virtuali, stazioni ARPAC, timeline oraria e heatmap IDW sul campus.
-- Simulazione what-if: preset scenario, riduzione traffico, zona di intervento, verde aggiunto, vento, pioggia, mappa scenario e mappa delta.
+- Scenario builder: preset narrativi, zona di intervento, finestra temporale, confronto preset, mappa scenario, mappa delta per zona e componenti del modello.
+- Digital Twin: entità del campus, zone funzionali, sensori virtuali, mappa asset e layer di affidabilità spaziale.
 - Serie temporali: pollutant and sensor selectors.
 - Guida e metodologia: guida in linguaggio semplice, legenda, fonti dati, logica del modello e limiti.
 - Data quality: download/model metadata, row counts, station counts, schema warnings.

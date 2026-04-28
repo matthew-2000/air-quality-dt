@@ -58,6 +58,27 @@ I sensori virtuali rappresentano luoghi significativi del campus:
 
 Le coordinate sono sintetiche ma deterministiche, collocate attorno al centro campus. Questo permette di avere una prima interfaccia GIS anche prima di installare sensori reali.
 
+## Zone funzionali e entity model
+
+Il MVP crea anche un layer `campus_zones.geojson` con poligoni sintetici per:
+
+- mobilità;
+- parcheggi;
+- didattica;
+- servizi;
+- studio;
+- verde;
+- amministrazione.
+
+Ogni zona include proprietà utili alla simulazione:
+
+- `traffic_sensitivity`;
+- `green_capacity`;
+- descrizione;
+- qualità della geometria.
+
+Il file `digital_twin_entities.json` raccoglie zone e sensori virtuali come entità del Digital Twin. È una struttura semplice, pensata come primo passo verso modelli più interoperabili, per esempio NGSI-LD.
+
 ## Stima della qualità dell'aria
 
 Il modello usa una formula trasparente:
@@ -132,6 +153,25 @@ La dashboard mostra:
 - delta.
 
 Il delta è il risultato più utile per leggere gli scenari, perché mostra la differenza tra prima e dopo.
+
+Gli scenari possono essere applicati anche a finestre temporali:
+
+- solo ora selezionata;
+- mattina;
+- pranzo;
+- pomeriggio;
+- giornata intera.
+
+La dashboard aggrega il delta anche per zona funzionale, così l'utente può confrontare l'effetto spaziale dell'intervento.
+
+## Affidabilità spaziale
+
+Il layer di affidabilità è dimostrativo. Viene calcolato in base alla distanza dal sensore virtuale più vicino:
+
+- alta vicino ai sensori;
+- più bassa nelle aree lontane dai sensori.
+
+Non rappresenta incertezza scientifica completa, ma aiuta l'utente a capire dove la simulazione è più o meno supportata dai punti disponibili.
 
 ## Human-centered design
 

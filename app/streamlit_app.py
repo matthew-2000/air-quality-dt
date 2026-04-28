@@ -16,14 +16,21 @@ from unisa_air_twin.config import load_settings
 from unisa_air_twin.gis import (
     available_timestamps,
     build_interpolation_grid,
+    build_reliability_grid,
+    color_zone_geojson,
     sensor_snapshot,
+    summarize_by_zone,
+    timestamp_window,
     value_color,
+    window_frame,
+    zone_delta_summary,
 )
 from unisa_air_twin.model import estimate_campus_air_quality
-from unisa_air_twin.scenario import apply_scenario
+from unisa_air_twin.scenario import apply_scenario, scenario_summary
 from unisa_air_twin.sensors import create_virtual_sensors
 from unisa_air_twin.storage import geojson_points_to_frame, read_geojson, read_table
 from unisa_air_twin.utils import read_json
+from unisa_air_twin.zones import ensure_twin_layers
 
 st.set_page_config(page_title="UNISA Air Quality Digital Twin - MVP", layout="wide")
 
@@ -76,11 +83,13 @@ st.markdown(
 
 
 @st.cache_data(show_spinner=False)
-def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict, dict[str, dict]]:
+def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict, dict[str, dict], dict, dict]:
     settings = load_settings()
     sensors = geojson_points_to_frame(settings.processed_dir / "campus_virtual_sensors.geojson")
     if sensors.empty:
         sensors = create_virtual_sensors(settings)
+    if not (settings.processed_dir / "campus_zones.geojson").exists():
+        ensure_twin_layers(settings)
     estimates = read_table(settings.processed_dir / "campus_air_quality_estimates.parquet")
     if estimates.empty:
         clean_air_quality(settings)
@@ -95,7 +104,17 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict, dict[st
         "transport": read_geojson(settings.processed_dir / "campus_transport.geojson"),
         "parking": read_geojson(settings.processed_dir / "campus_parking.geojson"),
     }
-    return estimates, sensors, stations, schema_report if isinstance(schema_report, dict) else {"warnings": []}, layers
+    zones_geojson = read_geojson(settings.processed_dir / "campus_zones.geojson")
+    entities = read_json(settings.processed_dir / "digital_twin_entities.json", default={"entities": []})
+    return (
+        estimates,
+        sensors,
+        stations,
+        schema_report if isinstance(schema_report, dict) else {"warnings": []},
+        layers,
+        zones_geojson,
+        entities if isinstance(entities, dict) else {"entities": []},
+    )
 
 
 def color_series(values: pd.Series, palette: str = "value") -> list[list[int]]:
@@ -106,8 +125,21 @@ def color_series(values: pd.Series, palette: str = "value") -> list[list[int]]:
     return [value_color(float(value), low, high, palette=palette) for value in values]
 
 
-def build_base_layers(osm_layers: dict[str, dict], toggles: dict[str, bool]) -> list[pdk.Layer]:
+def build_base_layers(osm_layers: dict[str, dict], toggles: dict[str, bool], zones_geojson: dict | None = None) -> list[pdk.Layer]:
     layers: list[pdk.Layer] = []
+    if toggles.get("zones") and zones_geojson:
+        layers.append(
+            pdk.Layer(
+                "GeoJsonLayer",
+                zones_geojson,
+                stroked=True,
+                filled=True,
+                get_fill_color=[42, 145, 95, 28],
+                get_line_color=[42, 145, 95, 160],
+                line_width_min_pixels=2,
+                pickable=True,
+            )
+        )
     if toggles.get("buildings"):
         layers.append(
             pdk.Layer(
@@ -201,6 +233,19 @@ def grid_layer(grid: pd.DataFrame, value_column: str) -> pdk.Layer:
     )
 
 
+def zone_layer(zone_geojson: dict, tooltip_value: str | None = None) -> pdk.Layer:
+    return pdk.Layer(
+        "GeoJsonLayer",
+        zone_geojson,
+        stroked=True,
+        filled=True,
+        get_fill_color="properties.fill_color",
+        get_line_color=[45, 50, 56, 165],
+        line_width_min_pixels=2,
+        pickable=True,
+    )
+
+
 def station_layer(stations: pd.DataFrame) -> pdk.Layer | None:
     station_points = stations.dropna(subset=["lat", "lon"]) if not stations.empty else pd.DataFrame()
     if station_points.empty:
@@ -280,7 +325,7 @@ def format_zone(zone: str) -> str:
 
 
 settings = load_settings()
-estimates, sensors, stations, schema_report, osm_layers = load_data()
+estimates, sensors, stations, schema_report, osm_layers, zones_geojson, twin_entities = load_data()
 pollutants = sorted(estimates["pollutant"].dropna().unique()) if not estimates.empty else ["pm10"]
 
 with st.sidebar:
@@ -317,6 +362,16 @@ with st.sidebar:
             value=True,
             help="Superficie stimata dai sensori virtuali. Non è una misura continua reale.",
         ),
+        "zones": st.checkbox(
+            "Zone funzionali",
+            value=True,
+            help="Poligoni sintetici che rappresentano aree operative del Digital Twin: mobilità, parcheggi, didattica, verde e servizi.",
+        ),
+        "reliability": st.checkbox(
+            "Affidabilità spaziale",
+            value=False,
+            help="Layer dimostrativo: affidabilità più alta vicino ai sensori virtuali, più bassa lontano dai punti.",
+        ),
         "sensors": st.checkbox(
             "Sensori virtuali",
             value=True,
@@ -352,8 +407,15 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-tab_gis, tab_scenario, tab_timeseries, tab_guide, tab_quality = st.tabs(
-    ["GIS operativo", "Simulazione what-if", "Serie temporali", "Guida e metodologia", "Qualità dati"]
+tab_gis, tab_scenario, tab_twin, tab_timeseries, tab_guide, tab_quality = st.tabs(
+    [
+        "GIS operativo",
+        "Scenario builder",
+        "Digital Twin",
+        "Serie temporali",
+        "Guida e metodologia",
+        "Qualità dati",
+    ]
 )
 
 with tab_gis:
@@ -378,14 +440,20 @@ with tab_gis:
                 "I sensori virtuali sono i punti più importanti da leggere. "
                 "La heatmap riempie lo spazio tra questi punti con una interpolazione semplice."
             )
+            st.write(
+                "Le zone funzionali trasformano la dashboard in un simulatore GIS: gli scenari possono essere letti per area, non solo per singolo sensore."
+            )
     with left:
         if snapshot.empty:
             st.warning("Nessun dato disponibile per l'ora selezionata.")
         else:
-            map_layers = build_base_layers(osm_layers, layer_toggles)
+            map_layers = build_base_layers(osm_layers, layer_toggles, zones_geojson)
             grid = build_interpolation_grid(snapshot, resolution=grid_resolution)
+            reliability_grid = build_reliability_grid(snapshot, resolution=grid_resolution)
             if layer_toggles["heatmap"] and not grid.empty:
                 map_layers.append(grid_layer(grid, "estimated_value"))
+            if layer_toggles["reliability"] and not reliability_grid.empty:
+                map_layers.append(grid_layer(reliability_grid, "reliability"))
             if layer_toggles["sensors"]:
                 map_layers.append(sensor_layer(snapshot, "estimated_value"))
             if layer_toggles["stations"]:
@@ -422,171 +490,375 @@ with tab_scenario:
     st.markdown(
         """
         <div class="guide-box">
-        Scegli un preset o modifica i controlli. La mappa Delta è la vista più importante:
-        valori negativi indicano un miglioramento stimato rispetto alla baseline.
+        Costruisci uno scenario spaziale: scegli dove agisce, cosa cambia e per quale finestra temporale.
+        La mappa Delta mostra l'effetto stimato per sensori e zone funzionali.
         </div>
         """,
         unsafe_allow_html=True,
     )
-    preset = st.selectbox(
-        "Preset scenario",
-        [
-            "Personalizzato",
-            "Traffico ridotto al terminal bus",
-            "Giornata di pioggia",
-            "Vento forte",
-            "Campus green mobility",
-        ],
-        help="I preset sono esempi narrativi. Puoi sempre modificarli con gli slider sotto.",
+    scenario_mode = st.radio(
+        "Modalità",
+        ["Scenario guidato", "Confronto preset"],
+        horizontal=True,
+        help="Usa Scenario guidato per costruire una simulazione. Usa Confronto preset per confrontare rapidamente alternative.",
     )
+    window_label = st.selectbox(
+        "Quando applicare lo scenario",
+        ["Solo ora selezionata", "Mattina", "Pranzo", "Pomeriggio", "Giornata intera"],
+        help="La finestra temporale serve per leggere l'effetto nel tempo, non solo sulla singola ora.",
+    )
+    scenario_timestamps = timestamp_window(timestamps, selected_timestamp, window_label)
+    scenario_window = window_frame(estimates, selected_pollutant, scenario_timestamps)
+    preset_options = [
+        "Personalizzato",
+        "Ora di punta al terminal bus",
+        "Parcheggio meno utilizzato",
+        "Giornata di pioggia",
+        "Vento forte",
+        "Campus green mobility",
+        "Nuova area verde nei parcheggi",
+    ]
     preset_values = {
         "Personalizzato": (0.2, 1.0, False, "all", 0.0),
-        "Traffico ridotto al terminal bus": (0.4, 1.0, False, "mobilita", 0.0),
+        "Ora di punta al terminal bus": (0.45, 1.0, False, "mobilita", 0.0),
+        "Parcheggio meno utilizzato": (0.35, 1.0, False, "parcheggio", 0.05),
         "Giornata di pioggia": (0.1, 1.0, True, "all", 0.0),
         "Vento forte": (0.0, 1.8, False, "all", 0.0),
         "Campus green mobility": (0.35, 1.1, False, "all", 0.25),
+        "Nuova area verde nei parcheggi": (0.15, 1.0, False, "parcheggio", 0.4),
     }
-    default_traffic, default_wind, default_rain, default_zone, default_green = preset_values[preset]
-    control_a, control_b, control_c, control_d = st.columns(4)
-    traffic_reduction = control_a.slider(
-        "Riduzione traffico",
-        0,
-        50,
-        int(default_traffic * 100),
-        step=5,
-        help="Percentuale ipotetica di riduzione del contributo traffico nel modello.",
-    ) / 100
-    wind_multiplier = control_b.slider(
-        "Moltiplicatore vento",
-        0.5,
-        2.0,
-        float(default_wind),
-        step=0.1,
-        help="Valori maggiori simulano vento più forte. Nel modello il vento disperde PM e NO2.",
-    )
-    focus_zone = control_c.selectbox(
-        "Zona intervento",
-        zones,
-        index=zones.index(default_zone) if default_zone in zones else 0,
-        format_func=format_zone,
-        help="Applica l'intervento soprattutto a una zona del campus. 'all' applica lo scenario ovunque.",
-    )
-    green_improvement = control_d.slider(
-        "Verde aggiunto",
-        0,
-        50,
-        int(default_green * 100),
-        step=5,
-        help="Proxy semplificato: aumenta l'effetto mitigante associato alle aree verdi.",
-    ) / 100
-    rain_event = st.toggle(
-        "Evento di pioggia",
-        value=default_rain,
-        help="Nel MVP la pioggia riduce soprattutto PM10 e PM2.5.",
-    )
 
-    scenario_snapshot = apply_scenario(
-        snapshot,
-        settings,
-        traffic_reduction=traffic_reduction,
-        wind_multiplier=wind_multiplier,
-        rain_event=rain_event,
-        focus_zone=focus_zone,
-        green_improvement=green_improvement,
-    )
-    if scenario_snapshot.empty:
-        st.warning("Scenario non disponibile per l'ora selezionata.")
-    else:
-        scenario_grid = build_interpolation_grid(
-            scenario_snapshot,
-            value_column="scenario_value",
-            resolution=grid_resolution,
-        )
-        delta_grid = build_interpolation_grid(
-            scenario_snapshot.rename(columns={"delta": "delta_value"}),
-            value_column="delta_value",
-            resolution=grid_resolution,
-        )
-        scenario_snapshot["delta_color"] = color_series(scenario_snapshot["delta"], palette="delta")
-        metric_a, metric_b, metric_c = st.columns(3)
-        metric_a.metric("Delta medio", f"{scenario_snapshot['delta'].mean():+.2f}")
-        metric_b.metric("Miglioramento massimo", f"{scenario_snapshot['delta'].min():+.2f}")
-        metric_c.metric("Sensori migliorati", f"{int((scenario_snapshot['delta'] < 0).sum())}/{len(scenario_snapshot)}")
-
-        map_a, map_b = st.columns(2)
-        with map_a:
-            st.subheader("Scenario")
-            scenario_layers = build_base_layers(osm_layers, layer_toggles)
-            if layer_toggles["heatmap"] and not scenario_grid.empty:
-                scenario_layers.append(grid_layer(scenario_grid, "scenario_value"))
-            if layer_toggles["sensors"]:
-                scenario_layers.append(sensor_layer(scenario_snapshot, "scenario_value"))
-            st.pydeck_chart(
-                deck(
-                    scenario_layers,
-                    {
-                        "html": "<b>{sensor_name}</b><br/>Scenario: {scenario_value}<br/>Baseline: {estimated_value}",
-                        "style": {"backgroundColor": "white", "color": "black"},
-                    },
-                ),
-                width="stretch",
+    if scenario_mode == "Confronto preset":
+        comparison_rows = []
+        for name in preset_options[1:]:
+            traffic, wind, rain, zone, green = preset_values[name]
+            candidate = apply_scenario(
+                snapshot,
+                settings,
+                traffic_reduction=traffic,
+                wind_multiplier=wind,
+                rain_event=rain,
+                focus_zone=zone,
+                green_improvement=green,
             )
-        with map_b:
-            st.subheader("Delta")
-            render_legend(delta=True)
-            delta_layers = build_base_layers(osm_layers, layer_toggles)
-            if layer_toggles["heatmap"] and not delta_grid.empty:
-                delta_layers.append(grid_layer(delta_grid, "delta_value"))
-            if layer_toggles["sensors"]:
-                delta_layers.append(
-                    pdk.Layer(
-                        "ScatterplotLayer",
-                        scenario_snapshot,
-                        get_position="[lon, lat]",
-                        get_radius=72,
-                        get_fill_color="delta_color",
-                        get_line_color=[255, 255, 255, 220],
-                        line_width_min_pixels=1,
-                        pickable=True,
-                    )
-                )
-            st.pydeck_chart(
-                deck(
-                    delta_layers,
-                    {
-                        "html": "<b>{sensor_name}</b><br/>Delta: {delta}<br/>Scenario: {scenario_value}",
-                        "style": {"backgroundColor": "white", "color": "black"},
-                    },
-                ),
-                width="stretch",
+            summary = scenario_summary(candidate)
+            comparison_rows.append(
+                {
+                    "scenario": name,
+                    "zona": format_zone(zone),
+                    "delta_medio": summary["mean_delta"],
+                    "miglioramento_massimo": summary["min_delta"],
+                    "sensori_migliorati": summary["improved_sensors"],
+                }
             )
-
+        comparison = pd.DataFrame(comparison_rows)
         fig = px.bar(
-            scenario_snapshot.sort_values("delta"),
-            x="sensor_name",
-            y="delta",
-            color="delta",
+            comparison.sort_values("delta_medio"),
+            x="scenario",
+            y="delta_medio",
+            color="delta_medio",
             color_continuous_scale=["#2a915f", "#efefdf", "#c44844"],
         )
-        fig.update_layout(xaxis_title="Sensore", yaxis_title=f"Delta {selected_pollutant.upper()}")
+        fig.update_layout(xaxis_title="Scenario", yaxis_title=f"Delta medio {selected_pollutant.upper()}")
         st.plotly_chart(fig, width="stretch")
-        st.dataframe(
-            scenario_snapshot[
-                ["sensor_name", "zone", "estimated_value", "scenario_value", "delta", "traffic_index", "green_index"]
-            ].sort_values("delta"),
-            width="stretch",
-            hide_index=True,
+        st.dataframe(comparison.sort_values("delta_medio"), width="stretch", hide_index=True)
+    else:
+        preset = st.selectbox(
+            "Scenario",
+            preset_options,
+            help="I preset sono esempi narrativi. Puoi sempre modificarli con gli slider sotto.",
         )
-        with st.expander("Come interpretare lo scenario"):
-            st.write(
-                "La baseline è il valore stimato prima dello scenario. "
-                "Lo scenario è il valore dopo le modifiche ipotetiche. "
-                "Il delta è scenario meno baseline."
+        default_traffic, default_wind, default_rain, default_zone, default_green = preset_values[preset]
+        control_a, control_b, control_c, control_d = st.columns(4)
+        traffic_reduction = control_a.slider(
+            "Riduzione traffico",
+            0,
+            50,
+            int(default_traffic * 100),
+            step=5,
+            help="Percentuale ipotetica di riduzione del contributo traffico nel modello.",
+        ) / 100
+        wind_multiplier = control_b.slider(
+            "Moltiplicatore vento",
+            0.5,
+            2.0,
+            float(default_wind),
+            step=0.1,
+            help="Valori maggiori simulano vento più forte. Nel modello il vento disperde PM e NO2.",
+        )
+        focus_zone = control_c.selectbox(
+            "Zona intervento",
+            zones,
+            index=zones.index(default_zone) if default_zone in zones else 0,
+            format_func=format_zone,
+            help="Applica l'intervento soprattutto a una zona del campus. 'all' applica lo scenario ovunque.",
+        )
+        green_improvement = control_d.slider(
+            "Verde aggiunto",
+            0,
+            50,
+            int(default_green * 100),
+            step=5,
+            help="Proxy semplificato: aumenta l'effetto mitigante associato alle aree verdi.",
+        ) / 100
+        rain_event = st.toggle(
+            "Evento di pioggia",
+            value=default_rain,
+            help="Nel MVP la pioggia riduce soprattutto PM10 e PM2.5.",
+        )
+
+        scenario_snapshot = apply_scenario(
+            snapshot,
+            settings,
+            traffic_reduction=traffic_reduction,
+            wind_multiplier=wind_multiplier,
+            rain_event=rain_event,
+            focus_zone=focus_zone,
+            green_improvement=green_improvement,
+        )
+        scenario_window_result = apply_scenario(
+            scenario_window,
+            settings,
+            traffic_reduction=traffic_reduction,
+            wind_multiplier=wind_multiplier,
+            rain_event=rain_event,
+            focus_zone=focus_zone,
+            green_improvement=green_improvement,
+        )
+        if scenario_snapshot.empty:
+            st.warning("Scenario non disponibile per l'ora selezionata.")
+        else:
+            scenario_grid = build_interpolation_grid(
+                scenario_snapshot,
+                value_column="scenario_value",
+                resolution=grid_resolution,
             )
-            st.write(
-                "Un delta negativo indica riduzione stimata dell'inquinante; "
-                "un delta positivo indica aumento stimato. Il risultato serve a confrontare alternative, non a certificare un effetto reale."
+            delta_grid = build_interpolation_grid(
+                scenario_snapshot.rename(columns={"delta": "delta_value"}),
+                value_column="delta_value",
+                resolution=grid_resolution,
             )
+            scenario_snapshot["delta_color"] = color_series(scenario_snapshot["delta"], palette="delta")
+            zone_summary = zone_delta_summary(scenario_snapshot)
+            zone_delta_geojson = color_zone_geojson(zones_geojson, zone_summary, "mean_delta")
+            summary = scenario_summary(scenario_snapshot)
+            metric_a, metric_b, metric_c, metric_d = st.columns(4)
+            metric_a.metric("Delta medio", f"{summary['mean_delta']:+.2f}")
+            metric_b.metric("Miglioramento massimo", f"{summary['min_delta']:+.2f}")
+            metric_c.metric("Sensori migliorati", f"{summary['improved_sensors']}/{len(scenario_snapshot)}")
+            metric_d.metric("Finestra", f"{len(scenario_timestamps)} ore")
+
+            map_a, map_b = st.columns(2)
+            with map_a:
+                st.subheader("Scenario")
+                scenario_layers = build_base_layers(osm_layers, layer_toggles, zones_geojson)
+                if layer_toggles["heatmap"] and not scenario_grid.empty:
+                    scenario_layers.append(grid_layer(scenario_grid, "scenario_value"))
+                if layer_toggles["sensors"]:
+                    scenario_layers.append(sensor_layer(scenario_snapshot, "scenario_value"))
+                st.pydeck_chart(
+                    deck(
+                        scenario_layers,
+                        {
+                            "html": "<b>{sensor_name}</b><br/>Scenario: {scenario_value}<br/>Baseline: {estimated_value}",
+                            "style": {"backgroundColor": "white", "color": "black"},
+                        },
+                    ),
+                    width="stretch",
+                )
+            with map_b:
+                st.subheader("Delta per zona")
+                render_legend(delta=True)
+                delta_layers = build_base_layers(osm_layers, {**layer_toggles, "zones": False}, zones_geojson)
+                delta_layers.append(zone_layer(zone_delta_geojson if not zone_summary.empty else zones_geojson))
+                if layer_toggles["heatmap"] and not delta_grid.empty:
+                    delta_layers.append(grid_layer(delta_grid, "delta_value"))
+                if layer_toggles["sensors"]:
+                    delta_layers.append(
+                        pdk.Layer(
+                            "ScatterplotLayer",
+                            scenario_snapshot,
+                            get_position="[lon, lat]",
+                            get_radius=72,
+                            get_fill_color="delta_color",
+                            get_line_color=[255, 255, 255, 220],
+                            line_width_min_pixels=1,
+                            pickable=True,
+                        )
+                    )
+                st.pydeck_chart(
+                    deck(
+                        delta_layers,
+                        {
+                            "html": "<b>{name}</b><br/>Zona: {zone}<br/>Delta medio: {mean_delta}",
+                            "style": {"backgroundColor": "white", "color": "black"},
+                        },
+                    ),
+                    width="stretch",
+                )
+
+            if not scenario_window_result.empty:
+                timeline = (
+                    scenario_window_result.groupby("timestamp", as_index=False)
+                    .agg(baseline=("estimated_value", "mean"), scenario=("scenario_value", "mean"))
+                    .sort_values("timestamp")
+                )
+                timeline_long = timeline.melt(
+                    id_vars="timestamp",
+                    value_vars=["baseline", "scenario"],
+                    var_name="serie",
+                    value_name="valore",
+                )
+                fig_timeline = px.line(timeline_long, x="timestamp", y="valore", color="serie", markers=True)
+                fig_timeline.update_layout(
+                    xaxis_title="Ora",
+                    yaxis_title=f"{selected_pollutant.upper()} medio sui sensori",
+                )
+                st.plotly_chart(fig_timeline, width="stretch")
+
+            st.subheader("Componenti del modello")
+            component_sensor = st.selectbox(
+                "Sensore da spiegare",
+                sorted(scenario_snapshot["sensor_name"].unique()),
+                help="Mostra quanto pesano base ARPAC, traffico, verde e meteo nel valore finale.",
+            )
+            component_row = scenario_snapshot[scenario_snapshot["sensor_name"] == component_sensor].iloc[0]
+            components = pd.DataFrame(
+                [
+                    {"componente": "Base ARPAC IDW", "valore": component_row["base_value"]},
+                    {"componente": "Traffico", "valore": component_row["traffic_component"]},
+                    {"componente": "Verde", "valore": -component_row["green_component"]},
+                    {"componente": "Meteo", "valore": component_row["weather_component"]},
+                ]
+            )
+            fig_components = px.bar(
+                components,
+                x="componente",
+                y="valore",
+                color="valore",
+                color_continuous_scale=["#2a915f", "#efefdf", "#c44844"],
+            )
+            fig_components.update_layout(xaxis_title="", yaxis_title="Contributo")
+            st.plotly_chart(fig_components, width="stretch")
+
+            st.dataframe(
+                scenario_snapshot[
+                    [
+                        "sensor_name",
+                        "zone",
+                        "estimated_value",
+                        "scenario_value",
+                        "delta",
+                        "traffic_index",
+                        "green_index",
+                    ]
+                ].sort_values("delta"),
+                width="stretch",
+                hide_index=True,
+            )
+            if not zone_summary.empty:
+                st.subheader("Delta aggregato per zona")
+                zone_summary_display = zone_summary.copy()
+                zone_summary_display["zona"] = zone_summary_display["zone"].map(format_zone)
+                st.dataframe(
+                    zone_summary_display[["zona", "mean_delta", "min_delta", "max_delta", "sensors"]].sort_values(
+                        "mean_delta"
+                    ),
+                    width="stretch",
+                    hide_index=True,
+                )
+            with st.expander("Come interpretare lo scenario"):
+                st.write(
+                    "La baseline è il valore stimato prima dello scenario. "
+                    "Lo scenario è il valore dopo le modifiche ipotetiche. "
+                    "Il delta è scenario meno baseline."
+                )
+                st.write(
+                    "Un delta negativo indica riduzione stimata dell'inquinante; "
+                    "un delta positivo indica aumento stimato. Il risultato serve a confrontare alternative, non a certificare un effetto reale."
+                )
+
+with tab_twin:
+    st.markdown(
+        """
+        <div class="guide-box">
+        Questa vista espone gli asset del Digital Twin: zone, sensori virtuali, geometrie e affidabilità spaziale.
+        È pensata per ragionare sul campus come sistema di entità, non solo come grafico ambientale.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    entity_rows = []
+    for entity in twin_entities.get("entities", []):
+        entity_rows.append(
+            {
+                "id": entity.get("id"),
+                "type": entity.get("type"),
+                "name": entity.get("name"),
+                "zone": format_zone(entity.get("zone", "")),
+                "description": (entity.get("properties") or {}).get("description", ""),
+            }
+        )
+    entity_df = pd.DataFrame(entity_rows)
+    metric_a, metric_b, metric_c = st.columns(3)
+    metric_a.metric("Entità Digital Twin", f"{len(entity_df):,}")
+    metric_b.metric("Zone funzionali", f"{int((entity_df['type'] == 'CampusZone').sum()) if not entity_df.empty else 0}")
+    metric_c.metric(
+        "Sensori virtuali",
+        f"{int((entity_df['type'] == 'VirtualSensor').sum()) if not entity_df.empty else 0}",
+    )
+
+    twin_map_a, twin_map_b = st.columns(2)
+    with twin_map_a:
+        st.subheader("Asset spaziali")
+        zone_value_summary = summarize_by_zone(snapshot, "estimated_value")
+        zone_value_geojson = color_zone_geojson(zones_geojson, zone_value_summary, "mean_value")
+        twin_layers = build_base_layers(osm_layers, {**layer_toggles, "zones": False}, zones_geojson)
+        twin_layers.append(zone_layer(zone_value_geojson))
+        if layer_toggles["sensors"]:
+            twin_layers.append(sensor_layer(snapshot, "estimated_value"))
+        st.pydeck_chart(
+            deck(
+                twin_layers,
+                {
+                    "html": "<b>{name}</b><br/>Zona: {zone}<br/>Valore medio: {mean_value}",
+                    "style": {"backgroundColor": "white", "color": "black"},
+                },
+            ),
+            width="stretch",
+        )
+    with twin_map_b:
+        st.subheader("Affidabilità spaziale")
+        reliability_grid = build_reliability_grid(snapshot, resolution=grid_resolution)
+        reliability_layers = build_base_layers(osm_layers, {**layer_toggles, "zones": True}, zones_geojson)
+        if not reliability_grid.empty:
+            reliability_layers.append(grid_layer(reliability_grid, "reliability"))
+        if layer_toggles["sensors"]:
+            reliability_layers.append(sensor_layer(snapshot, "estimated_value"))
+        st.pydeck_chart(
+            deck(
+                reliability_layers,
+                {
+                    "html": "Affidabilità: {reliability}<br/>Distanza sensore: {nearest_sensor_km} km",
+                    "style": {"backgroundColor": "white", "color": "black"},
+                },
+            ),
+            width="stretch",
+        )
+        st.caption(
+            "Layer dimostrativo: l'affidabilità è maggiore vicino ai sensori virtuali e minore nelle aree più lontane."
+        )
+
+    if not entity_df.empty:
+        selected_entity = st.selectbox(
+            "Scheda entità",
+            entity_df["id"].tolist(),
+            format_func=lambda entity_id: entity_df.loc[entity_df["id"] == entity_id, "name"].iloc[0],
+        )
+        selected_row = entity_df[entity_df["id"] == selected_entity].iloc[0]
+        st.markdown(f"**{selected_row['name']}** · `{selected_row['type']}` · zona {selected_row['zone']}")
+        st.write(selected_row["description"])
+        st.dataframe(entity_df.sort_values(["type", "name"]), width="stretch", hide_index=True)
 
 with tab_timeseries:
     sensor_names = sorted(estimates["sensor_name"].dropna().unique()) if not estimates.empty else []

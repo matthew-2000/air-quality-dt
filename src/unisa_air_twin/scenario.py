@@ -54,3 +54,21 @@ def latest_scenario_by_sensor(estimates: pd.DataFrame, settings: Settings, pollu
     latest_timestamp = filtered["timestamp"].max()
     latest = filtered[filtered["timestamp"] == latest_timestamp]
     return apply_scenario(latest, settings, **kwargs)
+
+
+def scenario_summary(scenario_values: pd.DataFrame) -> dict:
+    if scenario_values.empty or "delta" not in scenario_values.columns:
+        return {
+            "mean_delta": 0.0,
+            "min_delta": 0.0,
+            "max_delta": 0.0,
+            "improved_sensors": 0,
+            "rows": 0,
+        }
+    return {
+        "mean_delta": round(float(scenario_values["delta"].mean()), 3),
+        "min_delta": round(float(scenario_values["delta"].min()), 3),
+        "max_delta": round(float(scenario_values["delta"].max()), 3),
+        "improved_sensors": int((scenario_values["delta"] < 0).sum()),
+        "rows": int(len(scenario_values)),
+    }

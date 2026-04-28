@@ -49,6 +49,8 @@ La barra laterale contiene i controlli principali:
 - **Ora simulata**: scegli il momento da visualizzare.
 - **Risoluzione griglia**: aumenta o riduce il dettaglio della heatmap. Valori più alti sono più dettagliati ma più lenti.
 - **Layer GIS**: accendi o spegni edifici, strade, aree verdi, parcheggi, sensori virtuali e stazioni ARPAC.
+- **Zone funzionali**: mostra aree sintetiche del campus come mobilità, parcheggi, didattica, verde e servizi.
+- **Affidabilità spaziale**: mostra dove la stima è più vicina o più lontana dai sensori virtuali.
 
 ### GIS operativo
 
@@ -63,25 +65,49 @@ Elementi principali:
 
 La heatmap non è una misura diretta: è ottenuta interpolando i valori dei sensori virtuali.
 
-### Simulazione what-if
+### Scenario builder
 
-Questa sezione permette di provare scenari.
+Questa sezione permette di costruire scenari GIS. Non scegli solo un valore globale: scegli anche **dove** e **quando** applicarlo.
 
 Preset disponibili:
 
 - **Personalizzato**: imposta manualmente tutti i controlli.
-- **Traffico ridotto al terminal bus**: simula una riduzione del traffico nella zona mobilità.
+- **Ora di punta al terminal bus**: simula un intervento nella zona mobilità.
+- **Parcheggio meno utilizzato**: simula meno pressione veicolare in zona parcheggio.
 - **Giornata di pioggia**: applica una riduzione semplificata soprattutto su PM10 e PM2.5.
 - **Vento forte**: aumenta l'effetto del vento.
 - **Campus green mobility**: combina meno traffico e più verde.
+- **Nuova area verde nei parcheggi**: simula una misura green nella zona parcheggio.
+
+Puoi applicare lo scenario a:
+
+- solo ora selezionata;
+- mattina;
+- pranzo;
+- pomeriggio;
+- giornata intera.
 
 La mappa **Scenario** mostra il valore stimato dopo lo scenario.
 
-La mappa **Delta** mostra la differenza rispetto alla baseline:
+La mappa **Delta per zona** mostra la differenza rispetto alla baseline:
 
 - verde: miglioramento stimato;
 - chiaro: variazione piccola;
 - rosso: peggioramento stimato.
+
+La sezione **Componenti del modello** mostra come base ARPAC, traffico, verde e meteo contribuiscono al valore finale di un sensore.
+
+### Digital Twin
+
+Questa sezione mostra gli asset del gemello digitale:
+
+- zone funzionali;
+- sensori virtuali;
+- geometrie;
+- schede entità;
+- mappa di affidabilità spaziale.
+
+Serve a leggere il campus come sistema di entità GIS, non solo come grafico ambientale.
 
 ### Serie temporali
 
@@ -113,16 +139,17 @@ Questa sezione mostra:
 
 1. Seleziona `NO2`.
 2. Scegli un orario vicino alle 08:00 o 17:00.
-3. Vai su **Simulazione what-if**.
-4. Seleziona **Traffico ridotto al terminal bus**.
-5. Guarda la mappa **Delta**.
+3. Vai su **Scenario builder**.
+4. Seleziona **Ora di punta al terminal bus**.
+5. Imposta la finestra **Mattina**.
+6. Guarda la mappa **Delta per zona**.
 
 Se il modello produce un miglioramento, vedrai aree verdi nelle zone più influenzate dallo scenario.
 
 ### Esempio 2: effetto pioggia su PM10
 
 1. Seleziona `PM10`.
-2. Vai su **Simulazione what-if**.
+2. Vai su **Scenario builder**.
 3. Seleziona **Giornata di pioggia**.
 4. Guarda il delta medio e la tabella sensori.
 
@@ -140,8 +167,10 @@ In questo MVP la pioggia riduce in modo semplificato le polveri.
 - **ARPAC**: agenzia regionale che gestisce dati ufficiali di qualità dell'aria.
 - **OSM**: OpenStreetMap, mappa collaborativa usata per edifici, strade e aree verdi.
 - **Sensore virtuale**: punto simulato sul campus, non uno strumento fisico.
+- **Zona funzionale**: poligono sintetico che rappresenta una parte operativa del campus.
 - **Heatmap**: superficie colorata che aiuta a vedere pattern spaziali.
 - **IDW**: metodo semplice che stima un valore dando più peso ai punti vicini.
 - **Baseline**: situazione stimata prima dello scenario.
 - **Scenario**: situazione stimata dopo una modifica ipotetica.
 - **Delta**: differenza tra scenario e baseline.
+- **Affidabilità spaziale**: indicazione dimostrativa della vicinanza ai sensori virtuali.
