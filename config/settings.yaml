@@ -19,6 +19,9 @@ live_sensors:
     username_env: UNISA_MQTT_USERNAME
     password_env: UNISA_MQTT_PASSWORD
     topic_env: UNISA_MQTT_TOPIC
+  snapshots:
+    bucket_minutes: 1
+    freshness_minutes: 5
   raw:
     sensor_metadata_path: data/raw/live_sensors/sensor_catalog.json
     mqtt_csv_path: data/raw/live_sensors/mqtt_data.csv

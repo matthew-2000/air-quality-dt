@@ -169,9 +169,12 @@ class TwinDataService:
         estimates = data["estimates"]
         stations = data["stations"]
         pollutants = sorted(estimates["pollutant"].dropna().unique()) if not estimates.empty else []
-        default_pollutant = pollutants[0] if pollutants else "pm10"
+        configured_order = self.settings.model.get("pollutants", [])
+        preferred_order = ["pm10", "pm25", "pm1", *configured_order]
+        default_pollutant = next((item for item in preferred_order if item in pollutants), pollutants[0] if pollutants else "pm10")
         timestamps = self.timestamps(default_pollutant)
         latest_timestamp = timestamps[-1] if timestamps else None
+        latest_snapshot = self.snapshot(default_pollutant, latest_timestamp) if latest_timestamp else pd.DataFrame()
         zones = sorted(estimates["zone"].dropna().unique()) if "zone" in estimates.columns and not estimates.empty else []
         sensors = data["sensors"]
         latest_received = (
@@ -179,9 +182,17 @@ class TwinDataService:
             if "received_at" in estimates.columns and not estimates.empty
             else latest_timestamp
         )
+        active_sensors = int(latest_snapshot["sensor_id"].nunique()) if "sensor_id" in latest_snapshot.columns else 0
+        capable_sensors = (
+            int(pd.to_numeric(latest_snapshot["capable_sensor_count"], errors="coerce").max())
+            if "capable_sensor_count" in latest_snapshot.columns and not latest_snapshot.empty
+            else active_sensors
+        )
+        coverage_ratio = round(float(active_sensors) / capable_sensors, 3) if capable_sensors else 0.0
+        ingestion = data["ingestion_summary"]
         return {
             "project": "UNISA Air Quality Digital Twin",
-            "source": "UNISA Live MQTT",
+            "source": "Sensori reali UNISA",
             "campus": {
                 "name": self.settings.campus.get("name", "Campus di Fisciano"),
                 "latitude": self.settings.campus.get("fallback_latitude"),
@@ -192,11 +203,16 @@ class TwinDataService:
             "latest_timestamp": latest_timestamp,
             "latest_received_at": latest_received,
             "rows": int(len(estimates)),
+            "raw_rows": int(ingestion.get("raw_rows", 0)),
+            "snapshot_rows": int(ingestion.get("snapshot_rows", len(estimates))),
             "sensors": int(len(sensors)),
+            "active_sensors": active_sensors,
+            "capable_sensors": capable_sensors,
+            "coverage_ratio": coverage_ratio,
             "stations": int(len(stations)),
             "zones": [{"id": "all", "label": format_zone("all")}, *[{"id": zone, "label": format_zone(zone)} for zone in zones]],
             "presets": [{"name": name, **values} for name, values in SCENARIO_PRESETS.items()],
-            "ingestion": data["ingestion_summary"],
+            "ingestion": ingestion,
             "warnings": data["schema_report"].get("warnings", []),
         }
 

@@ -64,11 +64,24 @@ type Summary = {
   latest_timestamp: string | null;
   latest_received_at?: string | null;
   rows: number;
+  raw_rows?: number;
+  snapshot_rows?: number;
   sensors: number;
+  active_sensors?: number;
+  capable_sensors?: number;
+  coverage_ratio?: number;
   stations: number;
   zones: { id: string; label: string }[];
   presets: Preset[];
-  ingestion?: { rows?: number; sensors?: number; source?: string; generated_at?: string };
+  ingestion?: {
+    raw_rows?: number;
+    snapshot_rows?: number;
+    sensors?: number;
+    source?: string;
+    generated_at?: string;
+    snapshot_bucket_minutes?: number;
+    snapshot_freshness_minutes?: number;
+  };
   warnings: unknown[];
 };
 type MapPayload = {
@@ -146,6 +159,17 @@ function formatTime(value: string | null) {
     month: "short",
     hour: "2-digit",
     minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function formatTimeWithSeconds(value: string | null) {
+  if (!value) return "n/d";
+  return new Intl.DateTimeFormat("it-IT", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
   }).format(new Date(value));
 }
 
@@ -482,6 +506,22 @@ function App() {
     return mapData?.snapshot ?? [];
   }, [mapData, mode, scenario]);
 
+  const sensorCoverageText = useMemo(() => {
+    const active = activeSnapshot.length || summary?.active_sensors || 0;
+    const capable = summary?.capable_sensors || summary?.sensors || 0;
+    if (!capable) return `${active} sensori`;
+    return `${active}/${capable} sensori`;
+  }, [activeSnapshot.length, summary?.active_sensors, summary?.capable_sensors, summary?.sensors]);
+
+  const coveragePercent = useMemo(() => {
+    if (summary?.coverage_ratio !== undefined) {
+      return Math.round(summary.coverage_ratio * 100);
+    }
+    const capable = summary?.capable_sensors || summary?.sensors || 0;
+    if (!capable) return undefined;
+    return Math.round(((activeSnapshot.length || 0) / capable) * 100);
+  }, [activeSnapshot.length, summary?.capable_sensors, summary?.coverage_ratio, summary?.sensors]);
+
   const impactPercent = useMemo(() => {
     if (!scenario?.timeline.length) return undefined;
     const baselineAverage = mean(scenario.timeline.map((point) => point.baseline));
@@ -656,8 +696,8 @@ function App() {
               <Clock3 size={15} />
               {formatTime(timestamp)}
             </span>
-            <span className="meta-chip">MQTT UNISA</span>
-            <span className="meta-chip">{mapData?.snapshot.length ?? 0} sensori</span>
+            <span className="meta-chip">Snapshot operativo</span>
+            <span className="meta-chip">{sensorCoverageText}</span>
             {isPending ? <span className="meta-chip loading">Aggiornamento</span> : null}
           </div>
         </header>
@@ -809,11 +849,12 @@ function App() {
               <div className="reliability-copy">
                 <p>
                   Confidenza media {topSensors[0]?.confidence_label ? humanizeConfidence(topSensors[0].confidence_label) : "stabile"} con{" "}
-                  {mapData?.snapshot.length ?? 0} sensori disponibili.
+                  {sensorCoverageText} disponibili{coveragePercent !== undefined ? ` (${coveragePercent}% copertura)` : ""}.
                 </p>
                 <ul>
                   <li>Sensori fisici registrati: {summary?.sensors ?? "n/d"}</li>
-                  <li>Misure reali disponibili: {summary?.rows.toLocaleString("it-IT") ?? "n/d"}</li>
+                  <li>Snapshot operativi disponibili: {summary?.snapshot_rows?.toLocaleString("it-IT") ?? summary?.rows.toLocaleString("it-IT") ?? "n/d"}</li>
+                  <li>Misure grezze reali archiviate: {summary?.raw_rows?.toLocaleString("it-IT") ?? "n/d"}</li>
                   <li>Ultima ricezione MQTT: {formatTime(summary?.latest_received_at ?? null)}</li>
                 </ul>
               </div>
@@ -848,7 +889,7 @@ function App() {
             <select value={timestamp ?? ""} onChange={(event) => setTimestamp(event.target.value)}>
               {timestamps.map((item) => (
                 <option key={item} value={item}>
-                  {formatTime(item)}
+                  {formatTimeWithSeconds(item)}
                 </option>
               ))}
             </select>

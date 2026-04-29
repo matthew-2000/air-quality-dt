@@ -28,6 +28,13 @@ POLLUTANT_FIELDS = {
 }
 
 
+def _snapshot_settings(settings: Settings) -> tuple[int, int]:
+    config = settings.live_sensors.get("snapshots", {})
+    bucket_minutes = max(1, int(config.get("bucket_minutes", 1)))
+    freshness_minutes = max(bucket_minutes, int(config.get("freshness_minutes", 5)))
+    return bucket_minutes, freshness_minutes
+
+
 def _configured_path(settings: Settings, key: str) -> Path:
     raw_config = settings.live_sensors.get("raw", {})
     value = raw_config.get(key)
@@ -237,23 +244,94 @@ def normalize_mqtt_observations(settings: Settings) -> pd.DataFrame:
     return observations
 
 
+def _confidence_from_age_seconds(age_seconds: float, freshness_seconds: float) -> str:
+    if age_seconds <= max(60.0, freshness_seconds / 3):
+        return "alta"
+    if age_seconds <= max(180.0, freshness_seconds * 0.7):
+        return "media"
+    return "bassa"
+
+
+def build_operational_snapshots(settings: Settings, observations: pd.DataFrame) -> pd.DataFrame:
+    if observations.empty:
+        return observations.copy()
+
+    bucket_minutes, freshness_minutes = _snapshot_settings(settings)
+    bucket = pd.Timedelta(minutes=bucket_minutes)
+    freshness = pd.Timedelta(minutes=freshness_minutes)
+
+    frame = observations.copy()
+    frame["timestamp"] = pd.to_datetime(frame["timestamp"], errors="coerce")
+    frame["received_at"] = pd.to_datetime(frame["received_at"], errors="coerce")
+    frame = frame.dropna(subset=["timestamp"]).sort_values(["pollutant", "timestamp", "received_at", "sensor_id"])
+    if frame.empty:
+        return frame
+
+    rows: list[pd.DataFrame] = []
+    freshness_seconds = freshness.total_seconds()
+
+    for pollutant, pollutant_frame in frame.groupby("pollutant", sort=True):
+        pollutant_frame = pollutant_frame.copy()
+        capable_sensors = max(1, int(pollutant_frame["sensor_id"].nunique()))
+        first_bucket = pollutant_frame["timestamp"].min().floor(f"{bucket_minutes}min")
+        last_bucket = pollutant_frame["timestamp"].max().floor(f"{bucket_minutes}min")
+        snapshot_starts = pd.date_range(start=first_bucket, end=last_bucket, freq=f"{bucket_minutes}min")
+
+        for snapshot_start in snapshot_starts:
+            snapshot_end = snapshot_start + bucket
+            window = pollutant_frame[
+                (pollutant_frame["timestamp"] < snapshot_end) & (pollutant_frame["timestamp"] >= snapshot_end - freshness)
+            ]
+            if window.empty:
+                continue
+
+            latest_per_sensor = window.drop_duplicates(subset=["sensor_id"], keep="last").copy()
+            latest_per_sensor["measured_at"] = latest_per_sensor["timestamp"]
+            latest_per_sensor["timestamp"] = snapshot_start
+            latest_per_sensor["snapshot_bucket_minutes"] = bucket_minutes
+            latest_per_sensor["snapshot_freshness_minutes"] = freshness_minutes
+            latest_per_sensor["reading_age_seconds"] = (
+                (snapshot_end - latest_per_sensor["measured_at"]).dt.total_seconds().clip(lower=0).round().astype(int)
+            )
+            latest_per_sensor["confidence_label"] = latest_per_sensor["reading_age_seconds"].map(
+                lambda value: _confidence_from_age_seconds(float(value), freshness_seconds)
+            )
+            latest_per_sensor["station_count"] = int(len(latest_per_sensor))
+            latest_per_sensor["capable_sensor_count"] = capable_sensors
+            latest_per_sensor["coverage_ratio"] = round(float(len(latest_per_sensor)) / capable_sensors, 3)
+            rows.append(latest_per_sensor)
+
+    if not rows:
+        return pd.DataFrame(columns=[*observations.columns, "measured_at", "reading_age_seconds"])
+
+    snapshots = pd.concat(rows, ignore_index=True)
+    snapshots = snapshots.sort_values(["timestamp", "pollutant", "sensor_id"]).reset_index(drop=True)
+    return snapshots
+
+
 def build_realtime_dataset(settings: Settings) -> pd.DataFrame:
     sensors = write_real_sensor_geojson(settings)
     observations = normalize_mqtt_observations(settings)
+    snapshot_estimates = build_operational_snapshots(settings, observations)
     write_table(observations, settings.processed_dir / "real_sensor_observations.parquet")
-    write_table(observations, settings.processed_dir / "campus_air_quality_estimates.parquet")
+    write_table(snapshot_estimates, settings.processed_dir / "campus_air_quality_estimates.parquet")
+    bucket_minutes, freshness_minutes = _snapshot_settings(settings)
     metadata = {
-        "rows": int(len(observations)),
+        "raw_rows": int(len(observations)),
+        "snapshot_rows": int(len(snapshot_estimates)),
         "sensors": int(len(sensors)),
         "source": SOURCE_NAME,
         "source_url": SOURCE_URL,
         "generated_at": utc_now_iso(),
         "pollutants": sorted(observations["pollutant"].dropna().unique()) if not observations.empty else [],
+        "snapshot_bucket_minutes": bucket_minutes,
+        "snapshot_freshness_minutes": freshness_minutes,
+        "snapshot_timestamps": int(snapshot_estimates["timestamp"].nunique()) if not snapshot_estimates.empty else 0,
     }
     output = settings.processed_dir / "realtime_ingestion_summary.json"
     ensure_dir(output.parent)
     output.write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
-    return observations
+    return snapshot_estimates
 
 
 def collect_mqtt_messages(settings: Settings, duration_seconds: int = 60, max_messages: int | None = None) -> int:

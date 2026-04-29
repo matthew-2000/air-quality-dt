@@ -1099,6 +1099,16 @@ input[type="range"] {
     gap: 16px;
   }
 
+  .hero-header h1 {
+    max-width: 8ch;
+    font-size: clamp(1.9rem, 9vw, 2.5rem);
+  }
+
+  .hero-header p {
+    max-width: none;
+    font-size: 0.96rem;
+  }
+
   .main-panel {
     order: 1;
   }
@@ -1148,22 +1158,22 @@ input[type="range"] {
   }
 
   .map-stage {
-    min-height: 500px;
+    min-height: 460px;
   }
 
   .map-caption {
-    right: 14px;
-    left: 14px;
-    bottom: 14px;
+    right: 12px;
+    left: 12px;
+    bottom: 12px;
   }
 
   .map-footnote {
-    left: 14px;
-    top: 14px;
+    left: 12px;
+    top: 12px;
   }
 
   .map-compass {
-    right: 14px;
-    top: 14px;
+    right: 12px;
+    top: 12px;
   }
 }

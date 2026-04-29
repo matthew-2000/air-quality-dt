@@ -11,8 +11,8 @@ from unisa_air_twin.live_sensors import build_realtime_dataset
 
 def main() -> None:
     settings = load_settings()
-    observations = build_realtime_dataset(settings)
-    print(f"Created {len(observations):,} real UNISA sensor observation rows.")
+    snapshots = build_realtime_dataset(settings)
+    print(f"Created {len(snapshots):,} operational snapshot rows from real UNISA sensors.")
 
 
 if __name__ == "__main__":
