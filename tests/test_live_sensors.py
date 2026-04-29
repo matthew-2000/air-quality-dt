@@ -5,7 +5,11 @@ import json
 import pandas as pd
 
 from unisa_air_twin.config import load_settings
-from unisa_air_twin.live_sensors import build_operational_snapshots, build_realtime_dataset, load_sensor_catalog
+from unisa_air_twin.live_sensors import (
+    build_operational_snapshots,
+    build_realtime_dataset,
+    load_sensor_catalog,
+)
 
 
 def test_live_sensors_builds_real_sensor_rows(tmp_path) -> None:

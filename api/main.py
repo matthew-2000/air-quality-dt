@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import Body, FastAPI, Query
+from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -24,7 +24,7 @@ class ScenarioRequest(BaseModel):
 app = FastAPI(
     title="UNISA Air Quality Digital Twin API",
     version="0.1.0",
-    description="Operational API for campus air quality snapshots, GIS layers, and what-if scenarios.",
+    description="Operational API for real-only UNISA sensor snapshots, raw histories, and campus context layers.",
 )
 
 app.add_middleware(
@@ -72,9 +72,14 @@ def map_payload(
 
 @app.post("/api/scenario")
 def scenario(payload: Annotated[ScenarioRequest, Body()]) -> dict:
-    return get_twin_service().scenario_payload(**payload.model_dump())
+    raise HTTPException(status_code=410, detail="Scenario simulation disabled in real-only mode.")
 
 
 @app.get("/api/timeseries")
 def timeseries(pollutant: str = Query(...), sensor_name: str = Query(...)) -> dict:
     return {"points": get_twin_service().timeseries(pollutant, sensor_name)}
+
+
+@app.get("/api/sensor-detail")
+def sensor_detail(sensor_id: str = Query(...), timestamp: str = Query(...)) -> dict:
+    return get_twin_service().sensor_detail(sensor_id, timestamp)

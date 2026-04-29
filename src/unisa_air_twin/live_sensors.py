@@ -100,7 +100,6 @@ def load_sensor_catalog(settings: Settings) -> pd.DataFrame:
         lon = pd.to_numeric(item.get("lon"), errors="coerce")
         if not sensor_id or pd.isna(lat) or pd.isna(lon):
             continue
-        zone = _zone_for_point(settings, float(lat), float(lon))
         rows.append(
             {
                 "sensor_id": sensor_id,
@@ -108,7 +107,7 @@ def load_sensor_catalog(settings: Settings) -> pd.DataFrame:
                 "type": "real",
                 "lat": float(lat),
                 "lon": float(lon),
-                "zone": zone,
+                "zone": "campus",
                 "description": "Sensore fisico UNISA collegato al broker MQTT configurato.",
                 "coordinate_quality": "measured",
                 "source": SOURCE_NAME,
@@ -270,7 +269,7 @@ def build_operational_snapshots(settings: Settings, observations: pd.DataFrame) 
     rows: list[pd.DataFrame] = []
     freshness_seconds = freshness.total_seconds()
 
-    for pollutant, pollutant_frame in frame.groupby("pollutant", sort=True):
+    for _pollutant, pollutant_frame in frame.groupby("pollutant", sort=True):
         pollutant_frame = pollutant_frame.copy()
         capable_sensors = max(1, int(pollutant_frame["sensor_id"].nunique()))
         first_bucket = pollutant_frame["timestamp"].min().floor(f"{bucket_minutes}min")

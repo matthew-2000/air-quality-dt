@@ -1,27 +1,23 @@
 import {
   Activity,
-  AlertTriangle,
-  ArrowDownRight,
-  ArrowUpRight,
-  BarChart3,
-  CheckCircle2,
+  Archive,
   Clock3,
-  CloudRain,
-  Compass,
+  Database,
+  Droplets,
   Gauge,
   Leaf,
   Map as MapIcon,
+  MapPin,
   RadioTower,
   RefreshCcw,
-  Route,
-  ShieldCheck,
-  SlidersHorizontal,
-  Wind,
+  Search,
+  Thermometer,
+  Trees,
 } from "lucide-react";
 import * as L from "leaflet";
+import { useDeferredValue, useEffect, useMemo, useState, useTransition } from "react";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState, useTransition } from "react";
-import { CircleMarker, GeoJSON, MapContainer, Polygon, Popup, TileLayer, useMap } from "react-leaflet";
+import { CircleMarker, GeoJSON, MapContainer, Popup, TileLayer, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
@@ -32,28 +28,11 @@ type GeoFeature = {
   properties?: Record<string, unknown> | null;
 };
 type FeatureCollection = { type?: string; features: GeoFeature[] };
-type Sensor = LatLon & {
-  sensor_name: string;
-  zone: string;
-  estimated_value: number;
-  scenario_value?: number;
-  delta?: number;
-  confidence_label?: string;
-};
-type GridCell = {
-  polygon: [number, number][];
-  color: [number, number, number, number];
-  estimated_value?: number;
-  scenario_value?: number;
-  delta_value?: number;
-};
-type Preset = {
-  name: string;
-  traffic_reduction: number;
-  wind_multiplier: number;
-  rain_event: boolean;
-  focus_zone: string;
-  green_improvement: number;
+type CoverageRow = {
+  pollutant: string;
+  active_sensors: number;
+  capable_sensors: number;
+  coverage_ratio: number;
 };
 type Summary = {
   project: string;
@@ -70,9 +49,8 @@ type Summary = {
   active_sensors?: number;
   capable_sensors?: number;
   coverage_ratio?: number;
-  stations: number;
-  zones: { id: string; label: string }[];
-  presets: Preset[];
+  coverage_by_pollutant: CoverageRow[];
+  layer_counts?: Record<string, number>;
   ingestion?: {
     raw_rows?: number;
     snapshot_rows?: number;
@@ -83,62 +61,104 @@ type Summary = {
     snapshot_freshness_minutes?: number;
   };
   warnings: unknown[];
+  mode?: string;
+};
+type SnapshotSensor = LatLon & {
+  sensor_id: string;
+  sensor_name: string;
+  estimated_value: number;
+  measured_at?: string | null;
+  received_at?: string | null;
+  reading_age_seconds?: number;
+  reading_age_minutes?: number;
+  confidence_label?: string;
+  humidity?: number | null;
+  temperature?: number | null;
+  num_devices_sniffed?: number | null;
+  status?: string;
 };
 type MapPayload = {
-  snapshot: Sensor[];
-  grid: GridCell[];
-  reliability_grid: GridCell[];
+  snapshot: SnapshotSensor[];
+  grid: unknown[];
+  reliability_grid: unknown[];
   zones: FeatureCollection;
   layers: Record<string, FeatureCollection>;
-  stations: (LatLon & { station_name?: string; name?: string })[];
+  stations: LatLon[];
+  meta?: {
+    active_sensors: number;
+    capable_sensors: number;
+    coverage_ratio: number;
+    fresh_sensors: number;
+    recent_sensors: number;
+    aging_sensors: number;
+    median_age_seconds: number;
+    min_value?: number | null;
+    max_value?: number | null;
+  };
 };
-type ScenarioPayload = {
-  summary: { mean_delta: number; min_delta: number; max_delta: number; improved_sensors: number; rows: number };
-  snapshot: Sensor[];
-  scenario_grid: GridCell[];
-  delta_grid: GridCell[];
-  zone_summary: { zone: string; mean_delta: number; min_delta: number; max_delta: number; sensors: number }[];
-  zone_delta_geojson: FeatureCollection;
-  timeline: { timestamp: string; baseline: number; scenario: number }[];
+type HistoryPoint = {
+  timestamp: string;
+  estimated_value: number;
+  temperature?: number | null;
+  humidity?: number | null;
+  num_devices_sniffed?: number | null;
 };
-type ScenarioControls = {
-  traffic_reduction: number;
-  wind_multiplier: number;
-  rain_event: boolean;
-  focus_zone: string;
-  green_improvement: number;
-  window_label: string;
+type SensorMetric = {
+  pollutant: string;
+  estimated_value: number;
+  measured_at?: string | null;
+  received_at?: string | null;
+  reading_age_seconds?: number;
+  confidence_label?: string;
+  status?: string;
+  temperature?: number | null;
+  humidity?: number | null;
+  num_devices_sniffed?: number | null;
 };
-type MapMode = "baseline" | "scenario" | "delta";
-type Tone = "neutral" | "good" | "bad";
-
-const windows = ["Solo ora selezionata", "Mattina", "Pranzo", "Pomeriggio", "Giornata intera"];
+type SensorDetail = {
+  sensor: {
+    sensor_id: string;
+    name?: string;
+    lat?: number;
+    lon?: number;
+    description?: string;
+    coordinate_quality?: string;
+  };
+  timestamp: string;
+  latest_values: SensorMetric[];
+  history: Record<string, HistoryPoint[]>;
+  environment: {
+    temperature?: number | null;
+    humidity?: number | null;
+    num_devices_sniffed?: number | null;
+    received_at?: string | null;
+  };
+};
+type LayerVisibility = Record<"buildings" | "roads" | "green" | "transport" | "parking", boolean>;
 
 const pollutantLabels: Record<string, string> = {
-  pm1: "Particolato PM1",
-  pm10: "Particolato PM10",
-  pm25: "Particolato PM2.5",
-  "pm2.5": "Particolato PM2.5",
-  voc_index: "Indice VOC",
-  nox_index: "Indice NOx",
+  pm1: "PM1",
+  pm10: "PM10",
+  pm25: "PM2.5",
+  voc_index: "VOC index",
+  nox_index: "NOx index",
 };
 
-const defaultControls: ScenarioControls = {
-  traffic_reduction: 0.2,
-  wind_multiplier: 1.0,
-  rain_event: false,
-  focus_zone: "all",
-  green_improvement: 0,
-  window_label: "Solo ora selezionata",
-};
-
-const railSections = [
-  { id: "overview", label: "Panoramica", icon: <Gauge size={16} /> },
-  { id: "map", label: "Mappa", icon: <MapIcon size={16} /> },
-  { id: "scenario", label: "Scenario", icon: <SlidersHorizontal size={16} /> },
-  { id: "observations", label: "Punti chiave", icon: <Activity size={16} /> },
-  { id: "reliability", label: "Dati", icon: <ShieldCheck size={16} /> },
+const layerLabels: Array<{ id: keyof LayerVisibility; label: string; icon: ReactNode }> = [
+  { id: "buildings", label: "Edifici", icon: <MapIcon size={14} /> },
+  { id: "roads", label: "Viabilità", icon: <MapPin size={14} /> },
+  { id: "green", label: "Verde", icon: <Trees size={14} /> },
+  { id: "transport", label: "Trasporto", icon: <RadioTower size={14} /> },
+  { id: "parking", label: "Parcheggi", icon: <Database size={14} /> },
 ];
+
+const defaultLayers: LayerVisibility = {
+  buildings: true,
+  roads: true,
+  green: true,
+  transport: true,
+  parking: false,
+};
 
 async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, init);
@@ -148,11 +168,7 @@ async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json();
 }
 
-function rgba(color: [number, number, number, number], alphaScale = 1) {
-  return `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${(color[3] / 255) * alphaScale})`;
-}
-
-function formatTime(value: string | null) {
+function formatTime(value: string | null | undefined) {
   if (!value) return "n/d";
   return new Intl.DateTimeFormat("it-IT", {
     day: "2-digit",
@@ -162,7 +178,7 @@ function formatTime(value: string | null) {
   }).format(new Date(value));
 }
 
-function formatTimeWithSeconds(value: string | null) {
+function formatDateTime(value: string | null | undefined) {
   if (!value) return "n/d";
   return new Intl.DateTimeFormat("it-IT", {
     day: "2-digit",
@@ -173,43 +189,43 @@ function formatTimeWithSeconds(value: string | null) {
   }).format(new Date(value));
 }
 
-function formatNumber(value: number | undefined, fractionDigits = 1) {
-  if (value === undefined || Number.isNaN(value)) return "n/d";
+function formatNumber(value: number | null | undefined, digits = 1) {
+  if (value === null || value === undefined || Number.isNaN(value)) return "n/d";
   return value.toLocaleString("it-IT", {
-    maximumFractionDigits: fractionDigits,
-    minimumFractionDigits: fractionDigits,
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
   });
 }
 
-function formatSignedNumber(value: number | undefined, fractionDigits = 2) {
-  if (value === undefined || Number.isNaN(value)) return "n/d";
-  return `${value > 0 ? "+" : ""}${formatNumber(value, fractionDigits)}`;
+function formatPercent(value: number | null | undefined) {
+  if (value === null || value === undefined || Number.isNaN(value)) return "n/d";
+  return `${Math.round(value * 100)}%`;
 }
 
-function formatSignedPercent(value: number | undefined, fractionDigits = 0) {
-  if (value === undefined || Number.isNaN(value)) return "n/d";
-  return `${value > 0 ? "+" : ""}${value.toLocaleString("it-IT", {
-    maximumFractionDigits: fractionDigits,
-    minimumFractionDigits: fractionDigits,
-  })}%`;
+function ageLabel(seconds?: number | null) {
+  if (seconds === null || seconds === undefined || Number.isNaN(seconds)) return "età n/d";
+  if (seconds < 60) return `${seconds}s fa`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)} min fa`;
+  return `${(seconds / 3600).toFixed(1)} h fa`;
 }
 
-function deltaTone(value: number | undefined): Tone {
-  if (value === undefined) return "neutral";
-  if (value < -0.05) return "good";
-  if (value > 0.05) return "bad";
-  return "neutral";
+function statusLabel(status?: string) {
+  if (status === "fresh") return "fresco";
+  if (status === "recent") return "recente";
+  if (status === "aging") return "in ritardo";
+  return "n/d";
 }
 
-function collectPoints(mapData?: MapPayload, scenario?: ScenarioPayload): LatLon[] {
-  const points: LatLon[] = [];
-  mapData?.snapshot.forEach((sensor) => points.push(sensor));
-  mapData?.grid.forEach((cell) => cell.polygon.forEach(([lon, lat]) => points.push({ lat, lon })));
-  scenario?.delta_grid.forEach((cell) => cell.polygon.forEach(([lon, lat]) => points.push({ lat, lon })));
-  Object.values(mapData?.layers ?? {}).forEach((collection) => collectGeoPoints(collection).forEach((point) => points.push(point)));
-  collectGeoPoints(mapData?.zones).forEach((point) => points.push(point));
-  collectGeoPoints(scenario?.zone_delta_geojson).forEach((point) => points.push(point));
-  return points;
+function statusTone(status?: string) {
+  if (status === "fresh") return "good";
+  if (status === "recent") return "neutral";
+  if (status === "aging") return "warn";
+  return "muted";
+}
+
+function coverageText(active?: number, capable?: number) {
+  if (!capable) return `${active ?? 0} sensori`;
+  return `${active ?? 0}/${capable} sensori`;
 }
 
 function collectGeoPoints(collection?: FeatureCollection): LatLon[] {
@@ -226,35 +242,25 @@ function collectGeoPoints(collection?: FeatureCollection): LatLon[] {
   return points;
 }
 
-function mean(values: number[]) {
-  if (!values.length) return undefined;
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
+function collectPoints(mapData?: MapPayload): LatLon[] {
+  const points: LatLon[] = [];
+  mapData?.snapshot.forEach((sensor) => points.push(sensor));
+  Object.values(mapData?.layers ?? {}).forEach((layer) => collectGeoPoints(layer).forEach((point) => points.push(point)));
+  return points;
 }
 
-function humanizeZone(value: string) {
-  if (!value) return "Campus";
-  return value
-    .replaceAll("_", " ")
-    .replaceAll("-", " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function humanizeConfidence(value?: string) {
-  if (!value) return "stabile";
-  const normalized = value.toLowerCase();
-  if (normalized.includes("alta") || normalized.includes("high")) return "alta";
-  if (normalized.includes("media") || normalized.includes("medium")) return "media";
-  if (normalized.includes("bassa") || normalized.includes("low")) return "bassa";
-  return value;
-}
-
-function reliabilityFromLabel(value?: string) {
-  if (!value) return 0.7;
-  const normalized = value.toLowerCase();
-  if (normalized.includes("alta") || normalized.includes("high")) return 0.92;
-  if (normalized.includes("media") || normalized.includes("medium")) return 0.75;
-  if (normalized.includes("bassa") || normalized.includes("low")) return 0.48;
-  return 0.7;
+function pathForValues(values: number[]) {
+  if (!values.length) return "";
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  return values
+    .map((value, index) => {
+      const x = 4 + (index / Math.max(values.length - 1, 1)) * 92;
+      const y = 90 - ((value - min) / span) * 70;
+      return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
+    })
+    .join(" ");
 }
 
 function MapFitBounds({ points }: { points: LatLon[] }) {
@@ -263,7 +269,7 @@ function MapFitBounds({ points }: { points: LatLon[] }) {
   useEffect(() => {
     if (!points.length) return;
     const bounds = points.map((point) => [point.lat, point.lon] as [number, number]);
-    leafletMap.fitBounds(bounds, { padding: [36, 36], maxZoom: 16 });
+    leafletMap.fitBounds(bounds, { padding: [32, 32], maxZoom: 17 });
   }, [leafletMap, points]);
 
   return null;
@@ -271,26 +277,17 @@ function MapFitBounds({ points }: { points: LatLon[] }) {
 
 function CampusMap({
   mapData,
-  scenario,
-  mode,
+  visibility,
+  selectedSensorId,
+  onSelectSensor,
 }: {
   mapData?: MapPayload;
-  scenario?: ScenarioPayload;
-  mode: MapMode;
+  visibility: LayerVisibility;
+  selectedSensorId: string | null;
+  onSelectSensor: (sensorId: string) => void;
 }) {
-  const grid = mode === "delta" ? scenario?.delta_grid : mode === "scenario" ? scenario?.scenario_grid : mapData?.grid;
-  const zones = mode === "delta" ? scenario?.zone_delta_geojson : mapData?.zones;
-  const sensors = mode !== "baseline" && scenario?.snapshot.length ? scenario.snapshot : mapData?.snapshot ?? [];
-  const campusPoints = useMemo(() => collectPoints(mapData, scenario), [mapData, scenario]);
   const center: [number, number] = [40.771, 14.79];
-  const layerStyle = {
-    buildings: { color: "#465147", weight: 1, fillColor: "#657066", fillOpacity: 0.18, opacity: 0.3 },
-    green: { color: "#6f9a61", weight: 1, fillColor: "#7cab6a", fillOpacity: 0.28, opacity: 0.38 },
-    roads: { color: "#897967", weight: 2, opacity: 0.42 },
-    parking: { color: "#ad8453", weight: 1, fillColor: "#dbb37a", fillOpacity: 0.28, opacity: 0.55 },
-    transport: { color: "#5d7f8f", weight: 2, fillColor: "#5d7f8f", fillOpacity: 0.2, opacity: 0.7 },
-    zones: { color: "#32453a", weight: 2, fillOpacity: mode === "delta" ? 0.15 : 0.05, opacity: 0.48 },
-  };
+  const points = useMemo(() => collectPoints(mapData), [mapData]);
 
   return (
     <div className="map-shell">
@@ -299,68 +296,60 @@ function CampusMap({
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-        <MapFitBounds points={campusPoints} />
-        {grid?.map((cell, index) => (
-          <Polygon
-            key={`grid-${index}`}
-            positions={cell.polygon.map(([lon, lat]) => [lat, lon])}
-            pathOptions={{
-              color: "transparent",
-              fillColor: rgba(cell.color, 1),
-              fillOpacity: mode === "delta" ? 0.44 : mode === "scenario" ? 0.36 : 0.28,
-              weight: 0,
-            }}
-          />
-        ))}
-        {mapData?.layers.green ? <GeoJSON key="green" data={mapData.layers.green as never} style={layerStyle.green} /> : null}
-        {mapData?.layers.buildings ? (
-          <GeoJSON key="buildings" data={mapData.layers.buildings as never} style={layerStyle.buildings} />
-        ) : null}
-        {mapData?.layers.roads ? <GeoJSON key="roads" data={mapData.layers.roads as never} style={layerStyle.roads} /> : null}
-        {mapData?.layers.parking ? (
-          <GeoJSON key="parking" data={mapData.layers.parking as never} style={layerStyle.parking} />
-        ) : null}
-        {mapData?.layers.transport ? (
+        <MapFitBounds points={points} />
+        {visibility.green && mapData?.layers.green ? (
           <GeoJSON
-            key="transport"
-            data={mapData.layers.transport as never}
-            style={layerStyle.transport}
-            pointToLayer={(_feature, latlng) => L.circleMarker(latlng, { radius: 5, ...layerStyle.transport })}
+            data={mapData.layers.green as never}
+            style={{ color: "#6f8b68", weight: 1, fillColor: "#8fb187", fillOpacity: 0.18, opacity: 0.35 }}
+            pointToLayer={(_feature, latlng) => L.circleMarker(latlng, { radius: 3, color: "#7c976f", fillOpacity: 0.85 })}
           />
         ) : null}
-        {zones ? <GeoJSON key={`zones-${mode}`} data={zones as never} style={layerStyle.zones} /> : null}
-        {mapData?.stations.map((station, index) => (
-          <CircleMarker
-            key={`station-${index}`}
-            center={[station.lat, station.lon]}
-            radius={6}
-            pathOptions={{ color: "#ffffff", fillColor: "#70869a", fillOpacity: 0.9, weight: 2 }}
-          >
-            <Popup>{station.station_name ?? station.name ?? "Sensore di riferimento"}</Popup>
-          </CircleMarker>
-        ))}
-        {sensors.map((sensor, index) => {
-          const delta = sensor.delta ?? 0;
-          const fillColor = mode === "delta" ? (delta < 0 ? "#5f8a4f" : "#cf8452") : mode === "scenario" ? "#567a5b" : "#2c3e33";
+        {visibility.buildings && mapData?.layers.buildings ? (
+          <GeoJSON
+            data={mapData.layers.buildings as never}
+            style={{ color: "#536257", weight: 1, fillColor: "#d8ddd4", fillOpacity: 0.28, opacity: 0.35 }}
+          />
+        ) : null}
+        {visibility.roads && mapData?.layers.roads ? (
+          <GeoJSON data={mapData.layers.roads as never} style={{ color: "#9c8d74", weight: 2, opacity: 0.55 }} />
+        ) : null}
+        {visibility.parking && mapData?.layers.parking ? (
+          <GeoJSON
+            data={mapData.layers.parking as never}
+            style={{ color: "#b18858", weight: 1, fillColor: "#d8bb90", fillOpacity: 0.2, opacity: 0.55 }}
+          />
+        ) : null}
+        {visibility.transport && mapData?.layers.transport ? (
+          <GeoJSON
+            data={mapData.layers.transport as never}
+            style={{ color: "#5d7888", weight: 2, fillColor: "#5d7888", fillOpacity: 0.15, opacity: 0.8 }}
+            pointToLayer={(_feature, latlng) => L.circleMarker(latlng, { radius: 4, color: "#5d7888", fillOpacity: 0.95 })}
+          />
+        ) : null}
+        {mapData?.snapshot.map((sensor) => {
+          const selected = sensor.sensor_id === selectedSensorId;
+          const tone = statusTone(sensor.status);
+          const fillColor =
+            tone === "good" ? "#496e4d" : tone === "neutral" ? "#9a7a46" : tone === "warn" ? "#ba6549" : "#5d665e";
           return (
             <CircleMarker
-              key={`${sensor.sensor_name}-${index}`}
+              key={sensor.sensor_id}
               center={[sensor.lat, sensor.lon]}
-              radius={8}
-              pathOptions={{ color: "#fffdf6", fillColor, fillOpacity: 0.96, weight: 3 }}
+              radius={selected ? 10 : 7}
+              pathOptions={{
+                color: selected ? "#f6f2e8" : "#fffaf2",
+                fillColor,
+                fillOpacity: 0.96,
+                weight: selected ? 4 : 3,
+              }}
+              eventHandlers={{ click: () => onSelectSensor(sensor.sensor_id) }}
             >
               <Popup>
                 <strong>{sensor.sensor_name}</strong>
                 <br />
-                Zona: {humanizeZone(sensor.zone)}
+                {formatNumber(sensor.estimated_value, 2)} {sensorLabelsSuffix(sensor)}
                 <br />
-                Valore: {formatNumber(sensor.scenario_value ?? sensor.estimated_value, 2)}
-                {sensor.delta !== undefined ? (
-                  <>
-                    <br />
-                    Delta: {formatSignedNumber(sensor.delta, 2)}
-                  </>
-                ) : null}
+                {statusLabel(sensor.status)} · {ageLabel(sensor.reading_age_seconds)}
               </Popup>
             </CircleMarker>
           );
@@ -370,54 +359,63 @@ function CampusMap({
   );
 }
 
-function Timeline({ points }: { points: ScenarioPayload["timeline"] }) {
-  const values = points.flatMap((point) => [point.baseline, point.scenario]);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const span = max - min || 1;
-  const pathFor = (key: "baseline" | "scenario") =>
-    points
-      .map((point, index) => {
-        const x = 4 + (index / Math.max(points.length - 1, 1)) * 92;
-        const y = 86 - ((point[key] - min) / span) * 70;
-        return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
-      })
-      .join(" ");
-
-  if (!points.length) return <div className="empty-line">Andamento non disponibile</div>;
-  return (
-    <svg className="timeline" viewBox="0 0 100 100" role="img" aria-label="Confronto tra situazione attuale e scenario">
-      <path d={pathFor("baseline")} className="line baseline" />
-      <path d={pathFor("scenario")} className="line scenario" />
-    </svg>
-  );
+function sensorLabelsSuffix(sensor: SnapshotSensor) {
+  return sensor.confidence_label ? `(${sensor.confidence_label})` : "";
 }
 
 function SummaryCard({
-  eyebrow,
   title,
   value,
   note,
   icon,
-  tone = "neutral",
 }: {
-  eyebrow: string;
   title: string;
   value: string;
   note: string;
   icon: ReactNode;
-  tone?: Tone;
 }) {
   return (
-    <article className={`summary-card ${tone}`}>
+    <article className="summary-card">
       <div>
-        <span className="card-eyebrow">{eyebrow}</span>
-        <strong>{title}</strong>
-        <p>{value}</p>
+        <span>{title}</span>
+        <strong>{value}</strong>
         <small>{note}</small>
       </div>
       <div className="summary-icon">{icon}</div>
     </article>
+  );
+}
+
+function CoverageBar({ row, selected, onSelect }: { row: CoverageRow; selected: boolean; onSelect: () => void }) {
+  return (
+    <button className={selected ? "coverage-row active" : "coverage-row"} onClick={onSelect}>
+      <div className="coverage-copy">
+        <strong>{pollutantLabels[row.pollutant] ?? row.pollutant.toUpperCase()}</strong>
+        <span>{coverageText(row.active_sensors, row.capable_sensors)}</span>
+      </div>
+      <div className="coverage-meter" aria-hidden="true">
+        <i style={{ width: `${Math.max(8, Math.round(row.coverage_ratio * 100))}%` }} />
+      </div>
+      <small>{formatPercent(row.coverage_ratio)}</small>
+    </button>
+  );
+}
+
+function TrendChart({ points, pollutant }: { points: HistoryPoint[]; pollutant: string }) {
+  if (!points.length) {
+    return <div className="chart-empty">Storico non disponibile per {pollutantLabels[pollutant] ?? pollutant.toUpperCase()}.</div>;
+  }
+  const values = points.map((point) => point.estimated_value);
+  return (
+    <div className="chart-shell">
+      <svg viewBox="0 0 100 100" className="trend-chart" role="img" aria-label={`Storico ${pollutant}`}>
+        <path d={pathForValues(values)} className="trend-line" />
+      </svg>
+      <div className="chart-axis">
+        <span>{formatTime(points[0]?.timestamp)}</span>
+        <span>{formatTime(points.at(-1)?.timestamp)}</span>
+      </div>
+    </div>
   );
 }
 
@@ -427,27 +425,32 @@ function App() {
   const [pollutant, setPollutant] = useState("pm10");
   const [timestamp, setTimestamp] = useState<string | null>(null);
   const [mapData, setMapData] = useState<MapPayload>();
-  const [scenario, setScenario] = useState<ScenarioPayload>();
-  const [mode, setMode] = useState<MapMode>("baseline");
+  const [sensorDetail, setSensorDetail] = useState<SensorDetail | null>(null);
+  const [selectedSensorId, setSelectedSensorId] = useState<string | null>(null);
+  const [layerVisibility, setLayerVisibility] = useState<LayerVisibility>(defaultLayers);
+  const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
-  const [controls, setControls] = useState<ScenarioControls>(defaultControls);
   const [refreshTick, setRefreshTick] = useState(0);
+  const [isPending, startTransition] = useTransition();
+  const deferredSearch = useDeferredValue(search);
 
   useEffect(() => {
-    getJson<{ status: string }>("/api/refresh", { method: "POST" })
-      .catch(() => undefined)
-      .then(() => getJson<Summary>("/api/summary"))
-      .then((payload) => {
-        setSummary(payload);
-        setPollutant((current) => current || payload.default_pollutant);
-        setTimestamp(payload.latest_timestamp);
-      })
-      .catch((reason) => setError(reason.message));
+    startTransition(() => {
+      getJson<{ status: string }>("/api/refresh", { method: "POST" })
+        .catch(() => undefined)
+        .then(() => getJson<Summary>("/api/summary"))
+        .then((payload) => {
+          setSummary(payload);
+          setPollutant((current) => current || payload.default_pollutant);
+          setTimestamp(payload.latest_timestamp);
+          setError(null);
+        })
+        .catch((reason) => setError(reason.message));
+    });
   }, [refreshTick]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => setRefreshTick((current) => current + 1), 30000);
+    const timer = window.setInterval(() => setRefreshTick((current) => current + 1), 60000);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -464,195 +467,76 @@ function App() {
   useEffect(() => {
     if (!pollutant || !timestamp) return;
     startTransition(() => {
-      Promise.all([
-        getJson<MapPayload>(`/api/map?pollutant=${pollutant}&timestamp=${encodeURIComponent(timestamp)}&resolution=24`),
-        getJson<ScenarioPayload>("/api/scenario", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pollutant, timestamp, resolution: 24, ...controls }),
-        }),
-      ])
-        .then(([mapPayload, scenarioPayload]) => {
-          setMapData(mapPayload);
-          setScenario(scenarioPayload);
+      getJson<MapPayload>(`/api/map?pollutant=${encodeURIComponent(pollutant)}&timestamp=${encodeURIComponent(timestamp)}`)
+        .then((payload) => {
+          setMapData(payload);
           setError(null);
         })
         .catch((reason) => setError(reason.message));
     });
-  }, [pollutant, timestamp, controls, refreshTick]);
+  }, [pollutant, timestamp, refreshTick]);
 
-  const zoneLabels = useMemo(() => {
-    const next = new Map<string, string>();
-    summary?.zones.forEach((zone) => next.set(zone.id, zone.label));
-    return next;
-  }, [summary]);
-
-  const selectedPresetName = useMemo(() => {
-    if (!summary?.presets.length) return "Personalizzato";
-    const match = summary.presets.find(
-      (preset) =>
-        preset.traffic_reduction === controls.traffic_reduction &&
-        preset.wind_multiplier === controls.wind_multiplier &&
-        preset.rain_event === controls.rain_event &&
-        preset.focus_zone === controls.focus_zone &&
-        preset.green_improvement === controls.green_improvement,
-    );
-    return match?.name ?? "Personalizzato";
-  }, [controls, summary]);
-
-  const currentPollutantLabel = pollutantLabels[pollutant.toLowerCase()] ?? pollutant.toUpperCase();
-  const activeSnapshot = useMemo(() => {
-    if (mode !== "baseline" && scenario?.snapshot.length) return scenario.snapshot;
-    return mapData?.snapshot ?? [];
-  }, [mapData, mode, scenario]);
-
-  const sensorCoverageText = useMemo(() => {
-    const active = activeSnapshot.length || summary?.active_sensors || 0;
-    const capable = summary?.capable_sensors || summary?.sensors || 0;
-    if (!capable) return `${active} sensori`;
-    return `${active}/${capable} sensori`;
-  }, [activeSnapshot.length, summary?.active_sensors, summary?.capable_sensors, summary?.sensors]);
-
-  const coveragePercent = useMemo(() => {
-    if (summary?.coverage_ratio !== undefined) {
-      return Math.round(summary.coverage_ratio * 100);
+  useEffect(() => {
+    if (!mapData?.snapshot.length) {
+      setSelectedSensorId(null);
+      return;
     }
-    const capable = summary?.capable_sensors || summary?.sensors || 0;
-    if (!capable) return undefined;
-    return Math.round(((activeSnapshot.length || 0) / capable) * 100);
-  }, [activeSnapshot.length, summary?.capable_sensors, summary?.coverage_ratio, summary?.sensors]);
+    const stillAvailable = selectedSensorId && mapData.snapshot.some((sensor) => sensor.sensor_id === selectedSensorId);
+    if (stillAvailable) return;
+    const candidate = [...mapData.snapshot].sort((a, b) => (a.reading_age_seconds ?? 999999) - (b.reading_age_seconds ?? 999999))[0];
+    setSelectedSensorId(candidate?.sensor_id ?? null);
+  }, [mapData, selectedSensorId]);
 
-  const impactPercent = useMemo(() => {
-    if (!scenario?.timeline.length) return undefined;
-    const baselineAverage = mean(scenario.timeline.map((point) => point.baseline));
-    if (!baselineAverage) return undefined;
-    return (scenario.summary.mean_delta / baselineAverage) * 100;
-  }, [scenario]);
+  useEffect(() => {
+    if (!selectedSensorId || !timestamp) return;
+    getJson<SensorDetail>(
+      `/api/sensor-detail?sensor_id=${encodeURIComponent(selectedSensorId)}&timestamp=${encodeURIComponent(timestamp)}`,
+    )
+      .then((payload) => {
+        setSensorDetail(payload);
+        setError(null);
+      })
+      .catch((reason) => setError(reason.message));
+  }, [selectedSensorId, timestamp]);
 
-  const bestZone = useMemo(() => {
-    const candidate = [...(scenario?.zone_summary ?? [])]
-      .filter((zone) => Number.isFinite(zone.mean_delta))
-      .sort((a, b) => a.mean_delta - b.mean_delta)[0];
-    if (!candidate) return undefined;
-    return { ...candidate, label: zoneLabels.get(candidate.zone) ?? humanizeZone(candidate.zone) };
-  }, [scenario, zoneLabels]);
+  const activeSnapshot = mapData?.snapshot ?? [];
+  const filteredSnapshot = useMemo(() => {
+    const query = deferredSearch.trim().toLowerCase();
+    const sorted = [...activeSnapshot].sort((a, b) => {
+      const age = (a.reading_age_seconds ?? Number.MAX_SAFE_INTEGER) - (b.reading_age_seconds ?? Number.MAX_SAFE_INTEGER);
+      if (age !== 0) return age;
+      return (b.estimated_value ?? 0) - (a.estimated_value ?? 0);
+    });
+    if (!query) return sorted;
+    return sorted.filter((sensor) => sensor.sensor_name.toLowerCase().includes(query) || sensor.sensor_id.toLowerCase().includes(query));
+  }, [activeSnapshot, deferredSearch]);
 
-  const attentionZone = useMemo(() => {
-    const candidate = [...(scenario?.zone_summary ?? [])]
-      .filter((zone) => Number.isFinite(zone.mean_delta))
-      .sort((a, b) => b.mean_delta - a.mean_delta)[0];
-    if (!candidate) return undefined;
-    return { ...candidate, label: zoneLabels.get(candidate.zone) ?? humanizeZone(candidate.zone) };
-  }, [scenario, zoneLabels]);
+  const selectedSensorRow = useMemo(
+    () => activeSnapshot.find((sensor) => sensor.sensor_id === selectedSensorId) ?? null,
+    [activeSnapshot, selectedSensorId],
+  );
 
-  const topSensors = useMemo(() => {
-    return [...activeSnapshot]
-      .sort((a, b) =>
-        mode === "delta"
-          ? (a.delta ?? 0) - (b.delta ?? 0)
-          : (b.scenario_value ?? b.estimated_value) - (a.scenario_value ?? a.estimated_value),
-      )
-      .slice(0, 5);
-  }, [activeSnapshot, mode]);
+  const currentHistory = useMemo(() => {
+    if (!sensorDetail) return [];
+    return sensorDetail.history[pollutant] ?? [];
+  }, [pollutant, sensorDetail]);
 
-  const hotspotSensor = useMemo(() => {
-    return [...activeSnapshot]
-      .sort((a, b) => (b.scenario_value ?? b.estimated_value) - (a.scenario_value ?? a.estimated_value))[0];
-  }, [activeSnapshot]);
+  const currentMetric = useMemo(() => {
+    if (!sensorDetail) return null;
+    return sensorDetail.latest_values.find((item) => item.pollutant === pollutant) ?? sensorDetail.latest_values[0] ?? null;
+  }, [pollutant, sensorDetail]);
 
-  const improvementSensor = useMemo(() => {
-    return [...(scenario?.snapshot ?? [])]
-      .filter((sensor) => sensor.delta !== undefined)
-      .sort((a, b) => (a.delta ?? 0) - (b.delta ?? 0))[0];
-  }, [scenario]);
+  const selectedCoverage = useMemo(() => {
+    return summary?.coverage_by_pollutant.find((item) => item.pollutant === pollutant) ?? null;
+  }, [pollutant, summary]);
 
-  const zoneRows = useMemo(() => {
-    return [...(scenario?.zone_summary ?? [])]
-      .filter((zone) => Number.isFinite(zone.mean_delta))
-      .sort((a, b) => a.mean_delta - b.mean_delta)
-      .slice(0, 5)
-      .map((zone) => ({
-        ...zone,
-        label: zoneLabels.get(zone.zone) ?? humanizeZone(zone.zone),
-      }));
-  }, [scenario, zoneLabels]);
-
-  const reliabilityScore = useMemo(() => {
-    const snapshot = mapData?.snapshot ?? [];
-    if (!snapshot.length) return undefined;
-    const values = snapshot.map((sensor) => reliabilityFromLabel(sensor.confidence_label));
-    return Math.round((mean(values) ?? 0) * 100);
-  }, [mapData]);
-
-  const observationNotes = useMemo(() => {
-    const notes: Array<{ tone: Tone; text: string }> = [];
-    if (hotspotSensor) {
-      notes.push({
-        tone: "bad",
-        text: `${hotspotSensor.sensor_name} mostra il valore piu alto in ${zoneLabels.get(hotspotSensor.zone) ?? humanizeZone(hotspotSensor.zone)}.`,
-      });
-    }
-    if (improvementSensor && improvementSensor.delta !== undefined) {
-      notes.push({
-        tone: deltaTone(improvementSensor.delta),
-        text: `${improvementSensor.sensor_name} e il punto che beneficia di piu dello scenario (${formatSignedNumber(improvementSensor.delta, 2)}).`,
-      });
-    }
-    if (bestZone) {
-      notes.push({
-        tone: "good",
-        text: `${bestZone.label} e l'area con l'esito migliore nel confronto attuale.`,
-      });
-    }
-    return notes.slice(0, 3);
-  }, [bestZone, hotspotSensor, improvementSensor, zoneLabels]);
-
-  const narrative = useMemo(() => {
-    const delta = scenario?.summary.mean_delta;
-    if (delta === undefined) {
-      return "Quando scegli un intervento, qui trovi un riassunto in linguaggio semplice dell'effetto stimato sul campus.";
-    }
-
-    const change =
-      delta < -0.05
-        ? "migliorerebbe"
-        : delta > 0.05
-          ? "peggiorerebbe"
-          : "cambierebbe poco";
-    const intensity = Math.round(controls.traffic_reduction * 100);
-    const greenGain = Math.round(controls.green_improvement * 100);
-    const windText = `${controls.wind_multiplier.toFixed(1)}x`;
-    const zoneText =
-      controls.focus_zone === "all"
-        ? "su tutto il campus"
-        : `nella zona ${zoneLabels.get(controls.focus_zone) ?? humanizeZone(controls.focus_zone)}`;
-    const bestText = bestZone ? `L'effetto piu favorevole si vede in ${bestZone.label}.` : "";
-    const attentionText =
-      attentionZone && attentionZone.mean_delta > -0.05
-        ? `Conviene osservare con attenzione ${attentionZone.label} perche cambia meno delle altre aree.`
-        : "";
-
-    return `Con una riduzione del traffico del ${intensity}% ${zoneText}, vento ${windText}${controls.rain_event ? ", presenza di pioggia" : ""}${greenGain ? ` e piu verde (${greenGain}%)` : ""}, la qualita dell'aria ${change} in media di ${formatNumber(Math.abs(delta), 2)}. ${bestText} ${attentionText}`.trim();
-  }, [attentionZone, bestZone, controls, scenario, zoneLabels]);
-
-  const selectPreset = (name: string) => {
-    const preset = summary?.presets.find((item) => item.name === name);
-    if (!preset) return;
-    const { name: _name, ...presetControls } = preset;
-    setMode("scenario");
-    setControls((current) => ({ ...current, ...presetControls }));
-  };
-
-  const updateScenarioControls = (nextControls: ScenarioControls) => {
-    setMode("scenario");
-    setControls(nextControls);
-  };
+  const layerCountSummary = summary?.layer_counts ?? {};
 
   return (
-    <main className="app-shell" data-testid="air-twin-cockpit">
-      <aside className="rail">
-        <div className="rail-brand">
-          <div className="rail-mark">
+    <main className="app-shell" data-testid="air-twin-real-only">
+      <aside className="left-rail">
+        <div className="brand-block">
+          <div className="brand-mark">
             <Leaf size={18} />
           </div>
           <div>
@@ -661,404 +545,346 @@ function App() {
           </div>
         </div>
 
-        <nav className="rail-nav" aria-label="Sezioni schermata">
-          {railSections.map((item, index) => (
-            <a key={item.id} className={index === 0 ? "rail-link active" : "rail-link"} href={`#${item.id}`}>
-              {item.icon}
-              <span>{item.label}</span>
-            </a>
-          ))}
+        <nav className="rail-nav" aria-label="Sezioni dashboard">
+          <a href="#monitor">Monitor</a>
+          <a href="#sensors">Sensori</a>
+          <a href="#history">Storico</a>
+          <a href="#provenance">Dati</a>
         </nav>
 
-        <div className="rail-status">
-          <div className="rail-status-card">
-            <span className="card-eyebrow">Situazione rapida</span>
-            <strong>{controls.rain_event ? "Pioggia considerata" : "Nessuna pioggia"}</strong>
-            <p>Vento {controls.wind_multiplier.toFixed(1)}x</p>
-            <p>Traffico -{Math.round(controls.traffic_reduction * 100)}%</p>
-          </div>
-          <button className="refresh-button" onClick={() => setRefreshTick((current) => current + 1)}>
-            <RefreshCcw size={16} />
-            Aggiorna dati
-          </button>
-          <small>Ultimo aggiornamento {formatTime(summary?.latest_timestamp ?? timestamp)}</small>
+        <div className="rail-card">
+          <span>Modalità</span>
+          <strong>Misure reali soltanto</strong>
+          <p>Nessuna zona sintetica, nessuna heatmap simulata, nessuno scenario what-if.</p>
         </div>
+
+        <div className="rail-card">
+          <span>Snapshot operativo</span>
+          <strong>{formatDateTime(timestamp)}</strong>
+          <p>
+            Bucket {summary?.ingestion?.snapshot_bucket_minutes ?? "n/d"} min · finestra freschezza{" "}
+            {summary?.ingestion?.snapshot_freshness_minutes ?? "n/d"} min
+          </p>
+        </div>
+
+        <button className="refresh-button" onClick={() => setRefreshTick((current) => current + 1)}>
+          <RefreshCcw size={16} />
+          Aggiorna dati
+        </button>
       </aside>
 
-      <section className="main-panel">
-        <header className="hero-header" id="overview">
-          <div>
-            <h1>Operazioni ambientali campus</h1>
-            <p>Questa schermata ti mostra la qualita dell'aria stimata sul campus e l'effetto di possibili interventi.</p>
+      <section className="workspace">
+        <header className="hero" id="monitor">
+          <div className="hero-copy">
+            <h1>Cabina operativa sensori UNISA</h1>
+            <p>
+              La dashboard mostra solo ciò che è misurato davvero: snapshot dei sensori, storico grezzo e layer campus reali da
+              OpenStreetMap.
+            </p>
           </div>
           <div className="hero-meta">
-            <span className="meta-chip">
-              <Clock3 size={15} />
-              {formatTime(timestamp)}
-            </span>
-            <span className="meta-chip">Snapshot operativo</span>
-            <span className="meta-chip">{sensorCoverageText}</span>
-            {isPending ? <span className="meta-chip loading">Aggiornamento</span> : null}
+            <span>{summary?.source ?? "Sensori reali UNISA"}</span>
+            <span>{formatTime(summary?.latest_received_at)}</span>
+            <span>{summary?.mode === "real_only" ? "real-only" : "monitor"}</span>
           </div>
         </header>
 
         <section className="summary-grid">
           <SummaryCard
-            eyebrow="Inquinante e ora"
-            title={pollutant.toUpperCase()}
-            value={formatTime(timestamp)}
-            note={currentPollutantLabel}
-            icon={<CloudRain size={20} />}
+            title="Sensori attivi"
+            value={coverageText(summary?.active_sensors, summary?.capable_sensors)}
+            note="Nello snapshot selezionato"
+            icon={<RadioTower size={20} />}
           />
           <SummaryCard
-            eyebrow="Stima effetto scenario"
-            title={formatSignedNumber(scenario?.summary.mean_delta, 2)}
-            value={impactPercent !== undefined ? `${formatSignedPercent(impactPercent)} rispetto alla media` : "Confronto sul campus"}
-            note={scenario ? "Differenza media tra situazione attuale e intervento" : "n/d"}
-            icon={scenario && (scenario.summary.mean_delta ?? 0) <= 0 ? <ArrowDownRight size={20} /> : <ArrowUpRight size={20} />}
-            tone={deltaTone(scenario?.summary.mean_delta)}
+            title="Copertura"
+            value={formatPercent(summary?.coverage_ratio)}
+            note={selectedCoverage ? `${pollutantLabels[selectedCoverage.pollutant] ?? selectedCoverage.pollutant} attivo` : "Copertura snapshot"}
+            icon={<Gauge size={20} />}
           />
           <SummaryCard
-            eyebrow="Zona migliore"
-            title={bestZone?.label ?? "In attesa dati"}
-            value={bestZone ? `Delta medio ${formatSignedNumber(bestZone.mean_delta, 2)}` : "n/d"}
-            note="Area con l'esito piu favorevole in questo scenario"
-            icon={<CheckCircle2 size={20} />}
-            tone="good"
+            title="Ultima ricezione"
+            value={formatTime(summary?.latest_received_at)}
+            note="Tempo di arrivo più recente"
+            icon={<Clock3 size={20} />}
+          />
+          <SummaryCard
+            title="Misure archiviate"
+            value={formatNumber(summary?.raw_rows, 0)}
+            note="Osservazioni grezze disponibili"
+            icon={<Archive size={20} />}
           />
         </section>
 
-        {error ? (
-          <div className="error-banner">
-            <AlertTriangle size={18} /> {error}
-          </div>
-        ) : null}
+        {error ? <div className="error-banner">{error}</div> : null}
 
-        <section className="map-card" id="map">
-          <div className="map-card-head">
-            <div className="mode-switch" aria-label="Modalita mappa">
-              <button className={mode === "baseline" ? "active" : ""} onClick={() => setMode("baseline")}>
-                Situazione attuale
-              </button>
-              <button className={mode === "scenario" ? "active" : ""} onClick={() => setMode("scenario")}>
-                Intervento simulato
-              </button>
-              <button className={mode === "delta" ? "active" : ""} onClick={() => setMode("delta")}>
-                Differenza
-              </button>
-            </div>
-            <div className="map-legend">
-              <span>Come leggere la mappa</span>
-              <div className="legend-scale">
-                <i className="legend-dot good" />
-                <small>Migliora</small>
-                <i className="legend-dot neutral" />
-                <small>Quasi invariato</small>
-                <i className="legend-dot bad" />
-                <small>Peggiora</small>
-              </div>
-            </div>
-          </div>
-
-          <div className="map-stage">
-            <CampusMap mapData={mapData} scenario={scenario} mode={mode} />
-            <div className="map-overlay map-caption">
+        <section className="operations-grid">
+          <article className="panel coverage-panel">
+            <div className="panel-head">
               <div>
-                <strong>
-                  {mode === "delta"
-                    ? "Differenza rispetto alla situazione attuale"
-                    : mode === "scenario"
-                      ? "Effetto dell'intervento selezionato"
-                      : "Situazione stimata sul campus"}
-                </strong>
+                <span>Monitoraggio</span>
+                <h2>Copertura per inquinante</h2>
+              </div>
+              {isPending ? <small>Aggiornamento in corso</small> : null}
+            </div>
+            <div className="coverage-list">
+              {(summary?.coverage_by_pollutant ?? []).map((row) => (
+                <CoverageBar
+                  key={row.pollutant}
+                  row={row}
+                  selected={row.pollutant === pollutant}
+                  onSelect={() => setPollutant(row.pollutant)}
+                />
+              ))}
+            </div>
+            <div className="controls-bar">
+              <label>
+                <span>Inquinante</span>
+                <select value={pollutant} onChange={(event) => setPollutant(event.target.value)}>
+                  {summary?.pollutants.map((item) => (
+                    <option key={item} value={item}>
+                      {pollutantLabels[item] ?? item.toUpperCase()}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Timestamp operativo</span>
+                <select value={timestamp ?? ""} onChange={(event) => setTimestamp(event.target.value)}>
+                  {timestamps.map((item) => (
+                    <option key={item} value={item}>
+                      {formatDateTime(item)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="status-legend">
+              <span className="legend-item">
+                <i className="legend-dot good" />
+                fresco
+              </span>
+              <span className="legend-item">
+                <i className="legend-dot neutral" />
+                recente
+              </span>
+              <span className="legend-item">
+                <i className="legend-dot warn" />
+                in ritardo
+              </span>
+            </div>
+          </article>
+
+          <article className="panel map-panel">
+            <div className="panel-head">
+              <div>
+                <span>Mappa campus</span>
+                <h2>{pollutantLabels[pollutant] ?? pollutant.toUpperCase()}</h2>
+              </div>
+              <small>
+                {coverageText(mapData?.meta?.active_sensors, mapData?.meta?.capable_sensors)} · mediana età{" "}
+                {ageLabel(mapData?.meta?.median_age_seconds)}
+              </small>
+            </div>
+            <div className="layer-switches">
+              {layerLabels.map((layer) => (
+                <button
+                  key={layer.id}
+                  className={layerVisibility[layer.id] ? "layer-chip active" : "layer-chip"}
+                  onClick={() => setLayerVisibility((current) => ({ ...current, [layer.id]: !current[layer.id] }))}
+                >
+                  {layer.icon}
+                  {layer.label}
+                </button>
+              ))}
+            </div>
+            <CampusMap
+              mapData={mapData}
+              visibility={layerVisibility}
+              selectedSensorId={selectedSensorId}
+              onSelectSensor={setSelectedSensorId}
+            />
+            <div className="map-caption">
+              <p>
+                Marker reali dei sensori attivi. Colore = freschezza del dato. Layer campus da OSM: edifici, strade, verde,
+                trasporto e parcheggi.
+              </p>
+            </div>
+          </article>
+        </section>
+
+        <section className="detail-grid">
+          <article className="panel sensor-panel">
+            <div className="panel-head">
+              <div>
+                <span>Sensore selezionato</span>
+                <h2>{sensorDetail?.sensor.name ?? selectedSensorRow?.sensor_name ?? "Seleziona un sensore"}</h2>
+              </div>
+              <small>{selectedSensorId ?? "n/d"}</small>
+            </div>
+
+            <div className="sensor-meta">
+              <div>
+                <MapPin size={14} />
                 <span>
-                  Verde indica un miglioramento stimato; i toni piu caldi indicano aree dove il valore resta alto o cresce.
+                  {formatNumber(sensorDetail?.sensor.lat, 5)}, {formatNumber(sensorDetail?.sensor.lon, 5)}
                 </span>
               </div>
+              <div>
+                <Clock3 size={14} />
+                <span>{ageLabel(currentMetric?.reading_age_seconds)}</span>
+              </div>
+              <div>
+                <Activity size={14} />
+                <span>{statusLabel(currentMetric?.status)}</span>
+              </div>
             </div>
-            <div className="map-overlay map-compass">
-              <Compass size={16} />
-              <span>N</span>
+
+            <div className="metric-grid">
+              {(sensorDetail?.latest_values ?? []).map((metric) => (
+                <div key={metric.pollutant} className="metric-card">
+                  <span>{pollutantLabels[metric.pollutant] ?? metric.pollutant.toUpperCase()}</span>
+                  <strong>{formatNumber(metric.estimated_value, 2)}</strong>
+                  <small>{ageLabel(metric.reading_age_seconds)}</small>
+                </div>
+              ))}
             </div>
-            <div className="map-overlay map-footnote">
-              <span>Mappa stimata</span>
-              <strong>Risoluzione media (24)</strong>
+
+            <div className="environment-grid">
+              <div>
+                <Thermometer size={16} />
+                <div>
+                  <span>Temperatura</span>
+                  <strong>{formatNumber(sensorDetail?.environment.temperature, 1)} °C</strong>
+                </div>
+              </div>
+              <div>
+                <Droplets size={16} />
+                <div>
+                  <span>Umidità</span>
+                  <strong>{formatNumber(sensorDetail?.environment.humidity, 0)}%</strong>
+                </div>
+              </div>
+              <div>
+                <RadioTower size={16} />
+                <div>
+                  <span>Device sniffed</span>
+                  <strong>{formatNumber(sensorDetail?.environment.num_devices_sniffed, 0)}</strong>
+                </div>
+              </div>
             </div>
+          </article>
+
+          <article className="panel history-panel" id="history">
+            <div className="panel-head">
+              <div>
+                <span>Storico reale</span>
+                <h2>{pollutantLabels[pollutant] ?? pollutant.toUpperCase()}</h2>
+              </div>
+              <small>{sensorDetail?.sensor.name ?? "Seleziona un sensore dalla mappa o dalla tabella"}</small>
+            </div>
+            <TrendChart points={currentHistory} pollutant={pollutant} />
+            <div className="history-footer">
+              <div>
+                <span>Ultima misura</span>
+                <strong>{formatDateTime(currentMetric?.measured_at ?? null)}</strong>
+              </div>
+              <div>
+                <span>Ultima ricezione</span>
+                <strong>{formatDateTime(sensorDetail?.environment.received_at ?? null)}</strong>
+              </div>
+            </div>
+          </article>
+        </section>
+
+        <section className="panel table-panel" id="sensors">
+          <div className="panel-head">
+            <div>
+              <span>Registro sensori</span>
+              <h2>Snapshot operativo corrente</h2>
+            </div>
+            <label className="search-field">
+              <Search size={14} />
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Cerca per nome o ID sensore"
+              />
+            </label>
+          </div>
+
+          <div className="sensor-table">
+            <div className="sensor-table-head">
+              <span>Sensore</span>
+              <span>Stato</span>
+              <span>Valore</span>
+              <span>Età dato</span>
+              <span>Misurato</span>
+            </div>
+            {filteredSnapshot.map((sensor) => (
+              <button
+                key={sensor.sensor_id}
+                className={sensor.sensor_id === selectedSensorId ? "sensor-row active" : "sensor-row"}
+                onClick={() => setSelectedSensorId(sensor.sensor_id)}
+              >
+                <span>
+                  <strong>{sensor.sensor_name}</strong>
+                  <small>{sensor.sensor_id}</small>
+                </span>
+                <span className={`status-pill ${statusTone(sensor.status)}`}>{statusLabel(sensor.status)}</span>
+                <span>{formatNumber(sensor.estimated_value, 2)}</span>
+                <span>{ageLabel(sensor.reading_age_seconds)}</span>
+                <span>{formatTime(sensor.measured_at ?? null)}</span>
+              </button>
+            ))}
           </div>
         </section>
 
-        <section className="insight-grid" id="observations">
-          <article className="insight-card">
-            <div className="insight-card-head">
-              <EyeCardIcon />
+        <section className="provenance-grid" id="provenance">
+          <article className="panel provenance-panel">
+            <div className="panel-head">
               <div>
-                <h2>Punti da osservare</h2>
-                <p>Tre letture rapide per orientarti senza entrare nei dettagli tecnici.</p>
+                <span>Provenienza</span>
+                <h2>Dati reali e spiegabilità</h2>
               </div>
             </div>
-            <div className="observation-list">
-              {observationNotes.map((note, index) => (
-                <div key={`${note.text}-${index}`} className="observation-item">
-                  <i className={`legend-dot ${note.tone}`} />
-                  <span>{note.text}</span>
-                </div>
-              ))}
-            </div>
+            <ul className="provenance-list">
+              <li>Misure reali soltanto da sensori UNISA via broker MQTT configurato.</li>
+              <li>Snapshot operativi costruiti da misure recenti per aumentare la copertura senza inventare valori.</li>
+              <li>Nessuna area sintetica, nessuna zonizzazione manuale, nessuna interpolazione mostrata in UI.</li>
+              <li>Layer di contesto campus caricati da OpenStreetMap locale: {Object.entries(layerCountSummary).map(([key, value]) => `${key} ${value}`).join(" · ")}.</li>
+            </ul>
           </article>
 
-          <article className="insight-card">
-            <div className="insight-card-head">
-              <BarChart3 size={18} />
+          <article className="panel provenance-panel">
+            <div className="panel-head">
               <div>
-                <h2>Confronto per zona</h2>
-                <p>Le zone con il delta medio piu marcato per {pollutant.toUpperCase()}.</p>
+                <span>Dataset</span>
+                <h2>Stato ingestione</h2>
               </div>
             </div>
-            <div className="zone-comparison">
-              {zoneRows.map((zone) => (
-                <div key={zone.zone} className="zone-row">
-                  <div>
-                    <strong>{zone.label}</strong>
-                    <span>{zone.sensors} sensori reali</span>
-                  </div>
-                  <div className="zone-value">
-                    <b className={deltaTone(zone.mean_delta)}>{formatSignedNumber(zone.mean_delta, 2)}</b>
-                    <i style={{ width: `${Math.min(Math.abs(zone.mean_delta) * 38, 100)}%` }} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </article>
-
-          <article className="insight-card" id="reliability">
-            <div className="insight-card-head">
-              <ShieldCheck size={18} />
+            <div className="dataset-grid">
               <div>
-                <h2>Affidabilita dei dati</h2>
-                <p>Copertura dei sensori reali UNISA e freschezza dei dati MQTT.</p>
+                <span>Sensori registrati</span>
+                <strong>{summary?.sensors ?? "n/d"}</strong>
               </div>
-            </div>
-            <div className="reliability-body">
-              <div
-                className="reliability-ring"
-                style={{ ["--score" as string]: `${reliabilityScore ?? 0}%` }}
-                aria-label="Affidabilita stimata"
-              >
-                <strong>{reliabilityScore ?? "n/d"}%</strong>
+              <div>
+                <span>Snapshot operativi</span>
+                <strong>{formatNumber(summary?.snapshot_rows, 0)}</strong>
               </div>
-              <div className="reliability-copy">
-                <p>
-                  Confidenza media {topSensors[0]?.confidence_label ? humanizeConfidence(topSensors[0].confidence_label) : "stabile"} con{" "}
-                  {sensorCoverageText} disponibili{coveragePercent !== undefined ? ` (${coveragePercent}% copertura)` : ""}.
-                </p>
-                <ul>
-                  <li>Sensori fisici registrati: {summary?.sensors ?? "n/d"}</li>
-                  <li>Snapshot operativi disponibili: {summary?.snapshot_rows?.toLocaleString("it-IT") ?? summary?.rows.toLocaleString("it-IT") ?? "n/d"}</li>
-                  <li>Misure grezze reali archiviate: {summary?.raw_rows?.toLocaleString("it-IT") ?? "n/d"}</li>
-                  <li>Ultima ricezione MQTT: {formatTime(summary?.latest_received_at ?? null)}</li>
-                </ul>
+              <div>
+                <span>Osservazioni grezze</span>
+                <strong>{formatNumber(summary?.raw_rows, 0)}</strong>
+              </div>
+              <div>
+                <span>Ultima generazione</span>
+                <strong>{formatTime(summary?.ingestion?.generated_at ?? null)}</strong>
               </div>
             </div>
           </article>
         </section>
       </section>
-
-      <aside className="guide-panel" id="scenario">
-        <section className="step-card">
-          <div className="step-head">
-            <span>1</span>
-            <div>
-              <h2>Scegli inquinante e ora</h2>
-              <p>Seleziona il fenomeno che vuoi osservare e il momento da analizzare.</p>
-            </div>
-          </div>
-
-          <label>
-            <span className="field-label">Inquinante</span>
-            <select value={pollutant} onChange={(event) => setPollutant(event.target.value)}>
-              {summary?.pollutants.map((item) => (
-                <option key={item} value={item}>
-                  {item.toUpperCase()} - {pollutantLabels[item.toLowerCase()] ?? item.toUpperCase()}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label>
-            <span className="field-label">Data e ora</span>
-            <select value={timestamp ?? ""} onChange={(event) => setTimestamp(event.target.value)}>
-              {timestamps.map((item) => (
-                <option key={item} value={item}>
-                  {formatTimeWithSeconds(item)}
-                </option>
-              ))}
-            </select>
-          </label>
-        </section>
-
-        <section className="step-card">
-          <div className="step-head">
-            <span>2</span>
-            <div>
-              <h2>Scegli l'intervento</h2>
-              <p>Usa un preset gia pronto oppure adatta intensita, area e durata della simulazione.</p>
-            </div>
-          </div>
-
-          <label>
-            <span className="field-label">Scenario suggerito</span>
-            <select onChange={(event) => selectPreset(event.target.value)} value={selectedPresetName}>
-              {summary?.presets.map((preset) => (
-                <option key={preset.name}>{preset.name}</option>
-              ))}
-            </select>
-          </label>
-
-          <label className="range-field">
-            <span className="field-row">
-              <span className="field-label">Riduzione traffico</span>
-              <strong>-{Math.round(controls.traffic_reduction * 100)}%</strong>
-            </span>
-            <input
-              type="range"
-              min="0"
-              max="0.5"
-              step="0.05"
-              value={controls.traffic_reduction}
-              onChange={(event) => updateScenarioControls({ ...controls, traffic_reduction: Number(event.target.value) })}
-            />
-          </label>
-
-          <label className="range-field">
-            <span className="field-row">
-              <span className="field-label">Più vento</span>
-              <strong>{controls.wind_multiplier.toFixed(1)}x</strong>
-            </span>
-            <input
-              type="range"
-              min="0.5"
-              max="2"
-              step="0.1"
-              value={controls.wind_multiplier}
-              onChange={(event) => updateScenarioControls({ ...controls, wind_multiplier: Number(event.target.value) })}
-            />
-          </label>
-
-          <label className="range-field">
-            <span className="field-row">
-              <span className="field-label">Più verde</span>
-              <strong>+{Math.round(controls.green_improvement * 100)}%</strong>
-            </span>
-            <input
-              type="range"
-              min="0"
-              max="0.5"
-              step="0.05"
-              value={controls.green_improvement}
-              onChange={(event) => updateScenarioControls({ ...controls, green_improvement: Number(event.target.value) })}
-            />
-          </label>
-
-          <label>
-            <span className="field-label">Zona di interesse</span>
-            <select
-              value={controls.focus_zone}
-              onChange={(event) => updateScenarioControls({ ...controls, focus_zone: event.target.value })}
-            >
-              {summary?.zones.map((zone) => (
-                <option key={zone.id} value={zone.id}>
-                  {zone.label}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label>
-            <span className="field-label">Durata dell'effetto</span>
-            <select
-              value={controls.window_label}
-              onChange={(event) => updateScenarioControls({ ...controls, window_label: event.target.value })}
-            >
-              {windows.map((item) => (
-                <option key={item}>{item}</option>
-              ))}
-            </select>
-          </label>
-
-          <button
-            className={controls.rain_event ? "toggle-button active" : "toggle-button"}
-            onClick={() => updateScenarioControls({ ...controls, rain_event: !controls.rain_event })}
-          >
-            <CloudRain size={16} />
-            {controls.rain_event ? "Pioggia considerata" : "Aggiungi pioggia"}
-          </button>
-        </section>
-
-        <section className="step-card">
-          <div className="step-head">
-            <span>3</span>
-            <div>
-              <h2>Leggi il risultato</h2>
-              <p>Qui trovi il confronto tra situazione attuale e scenario in forma compatta.</p>
-            </div>
-          </div>
-
-          <div className={`result-card ${deltaTone(scenario?.summary.mean_delta)}`}>
-            <div>
-              <span className="card-eyebrow">Miglioramento stimato</span>
-              <strong>{formatSignedNumber(scenario?.summary.mean_delta, 2)}</strong>
-              <p>Delta medio campus ({pollutant.toUpperCase()})</p>
-            </div>
-            <div className="result-icon">
-              {scenario && (scenario.summary.mean_delta ?? 0) <= 0 ? <ArrowDownRight size={20} /> : <ArrowUpRight size={20} />}
-            </div>
-          </div>
-
-          <div className="timeline-panel">
-            <div className="timeline-head">
-              <span>Andamento atteso</span>
-              <small>{controls.window_label}</small>
-            </div>
-            <Timeline points={scenario?.timeline ?? []} />
-            <div className="legend">
-              <span>
-                <i className="baseline-swatch" />
-                situazione attuale
-              </span>
-              <span>
-                <i className="scenario-swatch" />
-                intervento simulato
-              </span>
-            </div>
-          </div>
-        </section>
-
-        <section className="brief-card">
-          <div className="brief-head">
-            <Leaf size={18} />
-            <div>
-              <h2>In breve</h2>
-              <p>Il riassunto interpretativo da condividere con chi non vuole leggere tutta la dashboard.</p>
-            </div>
-          </div>
-          <p>{narrative}</p>
-          <div className="brief-tags">
-            <span>Traffico -{Math.round(controls.traffic_reduction * 100)}%</span>
-            <span>Vento {controls.wind_multiplier.toFixed(1)}x</span>
-            <span>Verde +{Math.round(controls.green_improvement * 100)}%</span>
-            {controls.rain_event ? <span>Pioggia inclusa</span> : null}
-          </div>
-        </section>
-      </aside>
     </main>
-  );
-}
-
-function EyeCardIcon() {
-  return (
-    <div className="icon-badge">
-      <Activity size={18} />
-    </div>
   );
 }
 
