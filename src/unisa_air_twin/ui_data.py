@@ -9,6 +9,7 @@ from unisa_air_twin.config import Settings, load_settings
 from unisa_air_twin.gis import (
     available_timestamps,
     build_interpolation_grid,
+    build_reliability_grid,
     color_zone_geojson,
     sensor_snapshot,
     timestamp_window,
@@ -238,7 +239,7 @@ class TwinDataService:
         layer_counts = {name: int(len((layer or {}).get("features", []))) for name, layer in data["layers"].items()}
         return {
             "project": "UNISA Air Quality Digital Twin",
-            "source": "Sensori reali UNISA",
+            "source": "UNISA AQDT",
             "campus": {
                 "name": self.settings.campus.get("name", "Campus di Fisciano"),
                 "latitude": self.settings.campus.get("fallback_latitude"),
@@ -276,6 +277,8 @@ class TwinDataService:
         if not snapshot.empty:
             snapshot["status"] = snapshot["reading_age_seconds"].map(sensor_status)
             snapshot["reading_age_minutes"] = (pd.to_numeric(snapshot["reading_age_seconds"], errors="coerce") / 60.0).round(1)
+        grid = build_interpolation_grid(snapshot, resolution=resolution)
+        reliability_grid = build_reliability_grid(snapshot, resolution=resolution)
         ages = pd.to_numeric(snapshot["reading_age_seconds"], errors="coerce") if "reading_age_seconds" in snapshot.columns else pd.Series(dtype=float)
         values = pd.to_numeric(snapshot["estimated_value"], errors="coerce") if "estimated_value" in snapshot.columns else pd.Series(dtype=float)
         meta = {
@@ -300,8 +303,8 @@ class TwinDataService:
         stations = data["stations"].dropna(subset=["lat", "lon"]) if not data["stations"].empty else pd.DataFrame()
         return {
             "snapshot": frame_records(snapshot),
-            "grid": [],
-            "reliability_grid": [],
+            "grid": frame_records(grid),
+            "reliability_grid": frame_records(reliability_grid),
             "zones": {"type": "FeatureCollection", "features": []},
             "layers": data["layers"],
             "stations": frame_records(stations),

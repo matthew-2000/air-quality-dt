@@ -17,7 +17,7 @@ import {
 import * as L from "leaflet";
 import { useDeferredValue, useEffect, useMemo, useState, useTransition } from "react";
 import type { ReactNode } from "react";
-import { CircleMarker, GeoJSON, MapContainer, Popup, TileLayer, useMap } from "react-leaflet";
+import { CircleMarker, GeoJSON, MapContainer, Polygon, Popup, ScaleControl, TileLayer, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
@@ -77,10 +77,16 @@ type SnapshotSensor = LatLon & {
   num_devices_sniffed?: number | null;
   status?: string;
 };
+type GridCell = {
+  polygon: [number, number][];
+  color: [number, number, number, number];
+  estimated_value?: number;
+  reliability?: number;
+};
 type MapPayload = {
   snapshot: SnapshotSensor[];
-  grid: unknown[];
-  reliability_grid: unknown[];
+  grid: GridCell[];
+  reliability_grid: GridCell[];
   zones: FeatureCollection;
   layers: Record<string, FeatureCollection>;
   stations: LatLon[];
@@ -135,6 +141,7 @@ type SensorDetail = {
   };
 };
 type LayerVisibility = Record<"buildings" | "roads" | "green" | "transport" | "parking", boolean>;
+type MapView = "surface" | "sensors" | "coverage";
 
 const pollutantLabels: Record<string, string> = {
   pm1: "PM1",
@@ -166,6 +173,10 @@ async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(`Request failed: ${response.status}`);
   }
   return response.json();
+}
+
+function rgba(color: [number, number, number, number], alphaScale = 1) {
+  return `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${(color[3] / 255) * alphaScale})`;
 }
 
 function formatTime(value: string | null | undefined) {
@@ -228,6 +239,11 @@ function coverageText(active?: number, capable?: number) {
   return `${active ?? 0}/${capable} sensori`;
 }
 
+function reliabilityLabel(value?: number | null) {
+  if (value === null || value === undefined || Number.isNaN(value)) return "n/d";
+  return `${Math.round(value * 100)}%`;
+}
+
 function collectGeoPoints(collection?: FeatureCollection): LatLon[] {
   const points: LatLon[] = [];
   const visit = (value: unknown) => {
@@ -278,25 +294,41 @@ function MapFitBounds({ points }: { points: LatLon[] }) {
 function CampusMap({
   mapData,
   visibility,
+  view,
   selectedSensorId,
   onSelectSensor,
 }: {
   mapData?: MapPayload;
   visibility: LayerVisibility;
+  view: MapView;
   selectedSensorId: string | null;
   onSelectSensor: (sensorId: string) => void;
 }) {
   const center: [number, number] = [40.771, 14.79];
   const points = useMemo(() => collectPoints(mapData), [mapData]);
+  const grid = view === "coverage" ? mapData?.reliability_grid ?? [] : mapData?.grid ?? [];
 
   return (
     <div className="map-shell">
-      <MapContainer center={center} zoom={15} scrollWheelZoom className="leaflet-map" zoomControl={false}>
+      <MapContainer center={center} zoom={15} scrollWheelZoom className="leaflet-map" zoomControl>
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
+        <ScaleControl position="bottomleft" />
         <MapFitBounds points={points} />
+        {grid.map((cell, index) => (
+          <Polygon
+            key={`${view}-grid-${index}`}
+            positions={cell.polygon.map(([lon, lat]) => [lat, lon])}
+            pathOptions={{
+              color: "transparent",
+              fillColor: rgba(cell.color, view === "coverage" ? 0.52 : 0.42),
+              fillOpacity: view === "coverage" ? 0.52 : 0.42,
+              weight: 0,
+            }}
+          />
+        ))}
         {visibility.green && mapData?.layers.green ? (
           <GeoJSON
             data={mapData.layers.green as never}
@@ -329,8 +361,15 @@ function CampusMap({
         {mapData?.snapshot.map((sensor) => {
           const selected = sensor.sensor_id === selectedSensorId;
           const tone = statusTone(sensor.status);
-          const fillColor =
-            tone === "good" ? "#496e4d" : tone === "neutral" ? "#9a7a46" : tone === "warn" ? "#ba6549" : "#5d665e";
+          const fillColor = view === "sensors"
+            ? tone === "good"
+              ? "#496e4d"
+              : tone === "neutral"
+                ? "#9a7a46"
+                : tone === "warn"
+                  ? "#ba6549"
+                  : "#5d665e"
+            : "#465f45";
           return (
             <CircleMarker
               key={sensor.sensor_id}
@@ -401,6 +440,62 @@ function CoverageBar({ row, selected, onSelect }: { row: CoverageRow; selected: 
   );
 }
 
+function MapLegend({
+  view,
+  pollutant,
+  meta,
+}: {
+  view: MapView;
+  pollutant: string;
+  meta?: MapPayload["meta"];
+}) {
+  if (view === "coverage") {
+    return (
+      <div className="map-legend-box">
+        <strong>Presidio della rete</strong>
+        <div className="legend-scale gradient coverage" />
+        <div className="legend-axis">
+          <span>basso</span>
+          <span>alto</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (view === "surface") {
+    return (
+      <div className="map-legend-box">
+        <strong>{pollutantLabels[pollutant] ?? pollutant.toUpperCase()}</strong>
+        <div className="legend-scale gradient quality" />
+        <div className="legend-axis">
+          <span>{formatNumber(meta?.min_value ?? null, 1)}</span>
+          <span>{formatNumber(meta?.max_value ?? null, 1)}</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="map-legend-box">
+      <strong>Freschezza marker</strong>
+      <div className="status-legend compact">
+        <span className="legend-item">
+          <i className="legend-dot good" />
+          fresco
+        </span>
+        <span className="legend-item">
+          <i className="legend-dot neutral" />
+          recente
+        </span>
+        <span className="legend-item">
+          <i className="legend-dot warn" />
+          in ritardo
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function TrendChart({ points, pollutant }: { points: HistoryPoint[]; pollutant: string }) {
   if (!points.length) {
     return <div className="chart-empty">Storico non disponibile per {pollutantLabels[pollutant] ?? pollutant.toUpperCase()}.</div>;
@@ -428,6 +523,7 @@ function App() {
   const [sensorDetail, setSensorDetail] = useState<SensorDetail | null>(null);
   const [selectedSensorId, setSelectedSensorId] = useState<string | null>(null);
   const [layerVisibility, setLayerVisibility] = useState<LayerVisibility>(defaultLayers);
+  const [mapView, setMapView] = useState<MapView>("surface");
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
@@ -531,9 +627,10 @@ function App() {
   }, [pollutant, summary]);
 
   const layerCountSummary = summary?.layer_counts ?? {};
+  const dashboardReady = Boolean(summary && mapData);
 
   return (
-    <main className="app-shell" data-testid="air-twin-real-only">
+    <main className="app-shell" data-testid="air-twin-cockpit">
       <aside className="left-rail">
         <div className="brand-block">
           <div className="brand-mark">
@@ -553,17 +650,20 @@ function App() {
         </nav>
 
         <div className="rail-card">
-          <span>Modalità</span>
-          <strong>Misure reali soltanto</strong>
-          <p>Nessuna zona sintetica, nessuna heatmap simulata, nessuno scenario what-if.</p>
+          <span>Panoramica</span>
+          <strong>Monitoraggio campus</strong>
+          <p>Copertura sensori, qualità dell'aria, dettaglio puntuale e storico operativo.</p>
         </div>
 
         <div className="rail-card">
           <span>Snapshot operativo</span>
-          <strong>{formatDateTime(timestamp)}</strong>
+          <strong>{summary ? formatDateTime(timestamp) : "Caricamento..."}</strong>
           <p>
-            Bucket {summary?.ingestion?.snapshot_bucket_minutes ?? "n/d"} min · finestra freschezza{" "}
-            {summary?.ingestion?.snapshot_freshness_minutes ?? "n/d"} min
+            {summary
+              ? `Bucket ${summary.ingestion?.snapshot_bucket_minutes ?? "n/d"} min · finestra freschezza ${
+                  summary.ingestion?.snapshot_freshness_minutes ?? "n/d"
+                } min`
+              : "Allineamento dati sensori in corso"}
           </p>
         </div>
 
@@ -577,18 +677,17 @@ function App() {
         <header className="hero" id="monitor">
           <div className="hero-copy">
             <h1>Cabina operativa sensori UNISA</h1>
-            <p>
-              La dashboard mostra solo ciò che è misurato davvero: snapshot dei sensori, storico grezzo e layer campus reali da
-              OpenStreetMap.
-            </p>
+            <p>Monitora il campus con snapshot aggiornati, superficie di qualità dell'aria, dettaglio sensore e storico recente.</p>
           </div>
           <div className="hero-meta">
-            <span>{summary?.source ?? "Sensori reali UNISA"}</span>
-            <span>{formatTime(summary?.latest_received_at)}</span>
-            <span>{summary?.mode === "real_only" ? "real-only" : "monitor"}</span>
+            <span>{summary?.source ?? "UNISA AQDT"}</span>
+            <span>{summary ? formatTime(summary.latest_received_at) : "Aggiornamento..."}</span>
+            <span>{summary?.campus.name ?? "Campus Fisciano"}</span>
           </div>
         </header>
 
+        {dashboardReady ? (
+          <>
         <section className="summary-grid">
           <SummaryCard
             title="Sensori attivi"
@@ -609,9 +708,9 @@ function App() {
             icon={<Clock3 size={20} />}
           />
           <SummaryCard
-            title="Misure archiviate"
+            title="Osservazioni disponibili"
             value={formatNumber(summary?.raw_rows, 0)}
-            note="Osservazioni grezze disponibili"
+            note="Letture archiviate nella serie"
             icon={<Archive size={20} />}
           />
         </section>
@@ -679,12 +778,26 @@ function App() {
             <div className="panel-head">
               <div>
                 <span>Mappa campus</span>
-                <h2>{pollutantLabels[pollutant] ?? pollutant.toUpperCase()}</h2>
+                <h2>Qualità dell'aria {pollutantLabels[pollutant] ?? pollutant.toUpperCase()}</h2>
               </div>
               <small>
                 {coverageText(mapData?.meta?.active_sensors, mapData?.meta?.capable_sensors)} · mediana età{" "}
                 {ageLabel(mapData?.meta?.median_age_seconds)}
               </small>
+            </div>
+            <div className="map-toolbar">
+              <div className="view-switch" aria-label="Vista mappa">
+                <button className={mapView === "surface" ? "active" : ""} onClick={() => setMapView("surface")}>
+                  Superficie
+                </button>
+                <button className={mapView === "sensors" ? "active" : ""} onClick={() => setMapView("sensors")}>
+                  Sensori
+                </button>
+                <button className={mapView === "coverage" ? "active" : ""} onClick={() => setMapView("coverage")}>
+                  Copertura
+                </button>
+              </div>
+              <MapLegend view={mapView} pollutant={pollutant} meta={mapData?.meta} />
             </div>
             <div className="layer-switches">
               {layerLabels.map((layer) => (
@@ -701,13 +814,18 @@ function App() {
             <CampusMap
               mapData={mapData}
               visibility={layerVisibility}
+              view={mapView}
               selectedSensorId={selectedSensorId}
               onSelectSensor={setSelectedSensorId}
             />
             <div className="map-caption">
               <p>
-                Marker reali dei sensori attivi. Colore = freschezza del dato. Layer campus da OSM: edifici, strade, verde,
-                trasporto e parcheggi.
+                {mapView === "surface"
+                  ? "La superficie mostra la distribuzione stimata nel campus a partire dalle misure disponibili nello snapshot selezionato."
+                  : mapView === "coverage"
+                    ? "La vista copertura evidenzia le aree meglio presidiate dalla rete sensori disponibile in questo momento."
+                    : "La vista sensori mette al centro i marker e la freschezza delle misure acquisite."}{" "}
+                I layer di contesto sono basati su edifici, strade, verde, trasporto e parcheggi del campus.
               </p>
             </div>
           </article>
@@ -778,7 +896,7 @@ function App() {
           <article className="panel history-panel" id="history">
             <div className="panel-head">
               <div>
-                <span>Storico reale</span>
+                <span>Storico sensore</span>
                 <h2>{pollutantLabels[pollutant] ?? pollutant.toUpperCase()}</h2>
               </div>
               <small>{sensorDetail?.sensor.name ?? "Seleziona un sensore dalla mappa o dalla tabella"}</small>
@@ -844,15 +962,15 @@ function App() {
           <article className="panel provenance-panel">
             <div className="panel-head">
               <div>
-                <span>Provenienza</span>
-                <h2>Dati reali e spiegabilità</h2>
+                <span>Dati</span>
+                <h2>Rete e cartografia campus</h2>
               </div>
             </div>
             <ul className="provenance-list">
-              <li>Misure reali soltanto da sensori UNISA via broker MQTT configurato.</li>
-              <li>Snapshot operativi costruiti da misure recenti per aumentare la copertura senza inventare valori.</li>
-              <li>Nessuna area sintetica, nessuna zonizzazione manuale, nessuna interpolazione mostrata in UI.</li>
-              <li>Layer di contesto campus caricati da OpenStreetMap locale: {Object.entries(layerCountSummary).map(([key, value]) => `${key} ${value}`).join(" · ")}.</li>
+              <li>Snapshot operativo costruito sulle misure più recenti disponibili per ciascun sensore.</li>
+              <li>La superficie mappa sintetizza l'andamento del campus a partire dallo snapshot selezionato.</li>
+              <li>Il dettaglio sensore e lo storico mostrano le ultime letture archiviate per quel punto.</li>
+              <li>Layer di contesto campus da OpenStreetMap: {Object.entries(layerCountSummary).map(([key, value]) => `${key} ${value}`).join(" · ")}.</li>
             </ul>
           </article>
 
@@ -873,7 +991,7 @@ function App() {
                 <strong>{formatNumber(summary?.snapshot_rows, 0)}</strong>
               </div>
               <div>
-                <span>Osservazioni grezze</span>
+                <span>Osservazioni archiviate</span>
                 <strong>{formatNumber(summary?.raw_rows, 0)}</strong>
               </div>
               <div>
@@ -883,6 +1001,18 @@ function App() {
             </div>
           </article>
         </section>
+          </>
+        ) : (
+          <section className="panel loading-panel" aria-live="polite">
+            <div className="panel-head">
+              <div>
+                <span>Caricamento</span>
+                <h2>Allineamento dashboard</h2>
+              </div>
+            </div>
+            <p>I dati del campus sono in aggiornamento. La dashboard viene popolata non appena snapshot e mappa sono pronti.</p>
+          </section>
+        )}
       </section>
     </main>
   );
