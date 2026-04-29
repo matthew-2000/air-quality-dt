@@ -1,14 +1,24 @@
 import {
   Activity,
   AlertTriangle,
+  BarChart3,
   CloudRain,
+  Compass,
+  Gauge,
+  Leaf,
   Layers,
   Map,
+  RadioTower,
   RefreshCcw,
+  Route,
   SlidersHorizontal,
   Wind,
 } from "lucide-react";
+import * as L from "leaflet";
+import type { ReactNode } from "react";
 import { useEffect, useMemo, useState, useTransition } from "react";
+import { CircleMarker, GeoJSON, MapContainer, Polygon, Popup, TileLayer, useMap } from "react-leaflet";
+import "leaflet/dist/leaflet.css";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
 
@@ -79,6 +89,7 @@ type ScenarioControls = {
   green_improvement: number;
   window_label: string;
 };
+type MapMode = "baseline" | "scenario" | "delta";
 
 const windows = ["Solo ora selezionata", "Mattina", "Pranzo", "Pomeriggio", "Giornata intera"];
 
@@ -104,12 +115,43 @@ function formatTime(value: string | null) {
   }).format(new Date(value));
 }
 
+function formatNumber(value: number | undefined, fractionDigits = 1) {
+  if (value === undefined || Number.isNaN(value)) return "n/d";
+  return value.toLocaleString("it-IT", {
+    maximumFractionDigits: fractionDigits,
+    minimumFractionDigits: fractionDigits,
+  });
+}
+
+function deltaTone(value: number | undefined) {
+  if (value === undefined) return "neutral";
+  if (value < -0.05) return "good";
+  if (value > 0.05) return "bad";
+  return "neutral";
+}
+
 function collectPoints(mapData?: MapPayload, scenario?: ScenarioPayload): LatLon[] {
   const points: LatLon[] = [];
   mapData?.snapshot.forEach((sensor) => points.push(sensor));
-  mapData?.stations.forEach((station) => points.push(station));
   mapData?.grid.forEach((cell) => cell.polygon.forEach(([lon, lat]) => points.push({ lat, lon })));
   scenario?.delta_grid.forEach((cell) => cell.polygon.forEach(([lon, lat]) => points.push({ lat, lon })));
+  Object.values(mapData?.layers ?? {}).forEach((collection) => collectGeoPoints(collection).forEach((point) => points.push(point)));
+  collectGeoPoints(mapData?.zones).forEach((point) => points.push(point));
+  collectGeoPoints(scenario?.zone_delta_geojson).forEach((point) => points.push(point));
+  return points;
+}
+
+function collectGeoPoints(collection?: FeatureCollection): LatLon[] {
+  const points: LatLon[] = [];
+  const visit = (value: unknown) => {
+    if (!Array.isArray(value)) return;
+    if (value.length >= 2 && typeof value[0] === "number" && typeof value[1] === "number") {
+      points.push({ lon: Number(value[0]), lat: Number(value[1]) });
+      return;
+    }
+    value.forEach(visit);
+  };
+  collection?.features.forEach((feature) => visit(feature.geometry?.coordinates));
   return points;
 }
 
@@ -193,6 +235,39 @@ function featurePaths(collection: FeatureCollection | undefined, project: (point
   });
 }
 
+function featurePoints(collection: FeatureCollection | undefined, project: (point: LatLon) => [number, number]) {
+  if (!collection?.features) return [];
+  return collection.features.flatMap((feature, featureIndex) => {
+    const geometry = feature.geometry;
+    if (!geometry) return [];
+    if (geometry.type === "Point" && Array.isArray(geometry.coordinates)) {
+      const [lon, lat] = geometry.coordinates;
+      const [x, y] = project({ lon: Number(lon), lat: Number(lat) });
+      return [{ key: `${featureIndex}`, x, y, properties: feature.properties }];
+    }
+    if (geometry.type === "MultiPoint" && Array.isArray(geometry.coordinates)) {
+      return geometry.coordinates.map((pair, pointIndex) => {
+        const [lon, lat] = Array.isArray(pair) ? pair : [0, 0];
+        const [x, y] = project({ lon: Number(lon), lat: Number(lat) });
+        return { key: `${featureIndex}-${pointIndex}`, x, y, properties: feature.properties };
+      });
+    }
+    return [];
+  });
+}
+
+function MapFitBounds({ points }: { points: LatLon[] }) {
+  const leafletMap = useMap();
+
+  useEffect(() => {
+    if (!points.length) return;
+    const bounds = points.map((point) => [point.lat, point.lon] as [number, number]);
+    leafletMap.fitBounds(bounds, { padding: [36, 36], maxZoom: 16 });
+  }, [leafletMap, points]);
+
+  return null;
+}
+
 function CampusMap({
   mapData,
   scenario,
@@ -200,67 +275,92 @@ function CampusMap({
 }: {
   mapData?: MapPayload;
   scenario?: ScenarioPayload;
-  mode: "baseline" | "delta";
+  mode: MapMode;
 }) {
-  const projection = useProjection(mapData, scenario);
-  const grid = mode === "delta" ? scenario?.delta_grid : mapData?.grid;
+  const grid = mode === "delta" ? scenario?.delta_grid : mode === "scenario" ? scenario?.scenario_grid : mapData?.grid;
   const zones = mode === "delta" ? scenario?.zone_delta_geojson : mapData?.zones;
-  const sensors = mode === "delta" && scenario?.snapshot.length ? scenario.snapshot : mapData?.snapshot ?? [];
-  const zonePaths = featurePaths(zones, projection.project);
-  const roadPaths = featurePaths(mapData?.layers.roads, projection.project);
-  const buildingPaths = featurePaths(mapData?.layers.buildings, projection.project);
-  const greenPaths = featurePaths(mapData?.layers.green, projection.project);
+  const sensors = mode !== "baseline" && scenario?.snapshot.length ? scenario.snapshot : mapData?.snapshot ?? [];
+  const campusPoints = useMemo(() => collectPoints(mapData, scenario), [mapData, scenario]);
+  const center: [number, number] = [40.771, 14.79];
+  const layerStyle = {
+    buildings: { color: "#29342f", weight: 1, fillColor: "#2f3a34", fillOpacity: 0.22, opacity: 0.38 },
+    green: { color: "#367e49", weight: 1, fillColor: "#367e49", fillOpacity: 0.24, opacity: 0.35 },
+    roads: { color: "#42524a", weight: 2, opacity: 0.68 },
+    parking: { color: "#9d7330", weight: 1, fillColor: "#c49b42", fillOpacity: 0.24, opacity: 0.55 },
+    transport: { color: "#2f5f9f", weight: 2, fillColor: "#2f5f9f", fillOpacity: 0.22, opacity: 0.74 },
+    zones: { color: "#17201c", weight: 2, fillOpacity: mode === "delta" ? 0.2 : 0.07, opacity: 0.52 },
+  };
 
   return (
     <div className="map-shell">
-      <svg className="campus-map" viewBox="0 0 100 100" role="img" aria-label="Campus air quality map">
-        <rect width="100" height="100" fill="#e9ece5" />
-        {greenPaths.map((item) => (
-          <path key={`green-${item.key}`} d={item.path} className="geo-green" />
+      <MapContainer center={center} zoom={15} scrollWheelZoom className="leaflet-map" zoomControl={false}>
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
+        <MapFitBounds points={campusPoints} />
+        {grid?.map((cell, index) => (
+          <Polygon
+            key={`grid-${index}`}
+            positions={cell.polygon.map(([lon, lat]) => [lat, lon])}
+            pathOptions={{
+              color: "transparent",
+              fillColor: rgba(cell.color, 1),
+              fillOpacity: mode === "delta" ? 0.52 : mode === "scenario" ? 0.42 : 0.26,
+              weight: 0,
+            }}
+          />
         ))}
-        {buildingPaths.map((item) => (
-          <path key={`building-${item.key}`} d={item.path} className="geo-building" />
+        {mapData?.layers.green ? <GeoJSON key="green" data={mapData.layers.green as never} style={layerStyle.green} /> : null}
+        {mapData?.layers.buildings ? (
+          <GeoJSON key="buildings" data={mapData.layers.buildings as never} style={layerStyle.buildings} />
+        ) : null}
+        {mapData?.layers.roads ? <GeoJSON key="roads" data={mapData.layers.roads as never} style={layerStyle.roads} /> : null}
+        {mapData?.layers.parking ? (
+          <GeoJSON key="parking" data={mapData.layers.parking as never} style={layerStyle.parking} />
+        ) : null}
+        {mapData?.layers.transport ? (
+          <GeoJSON key="transport" data={mapData.layers.transport as never} style={layerStyle.transport} pointToLayer={(_feature, latlng) => L.circleMarker(latlng, { radius: 5, ...layerStyle.transport })} />
+        ) : null}
+        {zones ? <GeoJSON key={`zones-${mode}`} data={zones as never} style={layerStyle.zones} /> : null}
+        {mapData?.stations.map((station, index) => (
+          <CircleMarker
+            key={`station-${index}`}
+            center={[station.lat, station.lon]}
+            radius={6}
+            pathOptions={{ color: "#ffffff", fillColor: "#2f5f9f", fillOpacity: 0.9, weight: 2 }}
+          >
+            <Popup>{station.station_name ?? station.name ?? "Stazione ARPAC"}</Popup>
+          </CircleMarker>
         ))}
-        {roadPaths.map((item) => (
-          <path key={`road-${item.key}`} d={item.path} className="geo-road" />
-        ))}
-        {grid?.map((cell, index) => {
-          const path = cell.polygon
-            .map(([lon, lat], pointIndex) => {
-              const [x, y] = projection.project({ lon, lat });
-              return `${pointIndex === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
-            })
-            .join(" ")
-            .concat(" Z");
-          return <path key={`grid-${index}`} d={path} fill={rgba(cell.color, mode === "delta" ? 0.85 : 0.78)} />;
-        })}
-        {zonePaths.map((item) => {
-          const fill = item.properties?.fill_color as [number, number, number, number] | undefined;
-          return (
-            <path
-              key={`zone-${item.key}`}
-              d={item.path}
-              fill={fill ? rgba(fill, 0.8) : "transparent"}
-              className="zone-outline"
-            />
-          );
-        })}
-        {mapData?.stations.map((station, index) => {
-          const [x, y] = projection.project(station);
-          return <circle key={`station-${index}`} cx={x} cy={y} r="1.35" className="station-dot" />;
-        })}
         {sensors.map((sensor, index) => {
-          const [x, y] = projection.project(sensor);
           const delta = sensor.delta ?? 0;
-          const className = mode === "delta" ? (delta < 0 ? "sensor-dot improved" : "sensor-dot worse") : "sensor-dot";
+          const fillColor = mode === "delta" ? (delta < 0 ? "#2f8060" : "#bd5345") : mode === "scenario" ? "#2f8060" : "#101915";
           return (
-            <g key={`${sensor.sensor_name}-${index}`}>
-              <circle cx={x} cy={y} r="1.85" className={className} />
-              <title>{`${sensor.sensor_name}: ${(sensor.scenario_value ?? sensor.estimated_value).toFixed(2)}`}</title>
-            </g>
+            <CircleMarker
+              key={`${sensor.sensor_name}-${index}`}
+              center={[sensor.lat, sensor.lon]}
+              radius={8}
+              pathOptions={{ color: "#fffdf4", fillColor, fillOpacity: 0.96, weight: 3 }}
+            >
+              <Popup>
+                <strong>{sensor.sensor_name}</strong>
+                <br />
+                Zona: {sensor.zone}
+                <br />
+                Valore: {formatNumber(sensor.scenario_value ?? sensor.estimated_value, 2)}
+                {sensor.delta !== undefined ? (
+                  <>
+                    <br />
+                    Delta: {sensor.delta > 0 ? "+" : ""}
+                    {formatNumber(sensor.delta, 2)}
+                  </>
+                ) : null}
+              </Popup>
+            </CircleMarker>
           );
         })}
-      </svg>
+      </MapContainer>
     </div>
   );
 }
@@ -288,6 +388,29 @@ function Timeline({ points }: { points: ScenarioPayload["timeline"] }) {
   );
 }
 
+function MetricTile({
+  icon,
+  label,
+  value,
+  hint,
+  tone = "neutral",
+}: {
+  icon: ReactNode;
+  label: string;
+  value: string;
+  hint?: string;
+  tone?: "neutral" | "good" | "bad";
+}) {
+  return (
+    <div className={`metric-tile ${tone}`}>
+      <div className="metric-icon">{icon}</div>
+      <span>{label}</span>
+      <strong>{value}</strong>
+      {hint ? <em>{hint}</em> : null}
+    </div>
+  );
+}
+
 function App() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [timestamps, setTimestamps] = useState<string[]>([]);
@@ -295,7 +418,7 @@ function App() {
   const [timestamp, setTimestamp] = useState<string | null>(null);
   const [mapData, setMapData] = useState<MapPayload>();
   const [scenario, setScenario] = useState<ScenarioPayload>();
-  const [mode, setMode] = useState<"baseline" | "delta">("baseline");
+  const [mode, setMode] = useState<MapMode>("baseline");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [controls, setControls] = useState<ScenarioControls>({
@@ -356,25 +479,53 @@ function App() {
     const preset = summary?.presets.find((item) => item.name === name);
     if (!preset) return;
     const { name: _name, ...presetControls } = preset;
+    setMode("scenario");
     setControls((current) => ({ ...current, ...presetControls }));
   };
 
+  const updateScenarioControls = (nextControls: ScenarioControls) => {
+    setMode("scenario");
+    setControls(nextControls);
+  };
+
   const topSensors = useMemo(() => {
-    const source = mode === "delta" && scenario?.snapshot.length ? scenario.snapshot : mapData?.snapshot ?? [];
+    const source = mode !== "baseline" && scenario?.snapshot.length ? scenario.snapshot : mapData?.snapshot ?? [];
     return [...source]
-      .sort((a, b) => (mode === "delta" ? (a.delta ?? 0) - (b.delta ?? 0) : b.estimated_value - a.estimated_value))
+      .sort((a, b) =>
+        mode === "delta"
+          ? (a.delta ?? 0) - (b.delta ?? 0)
+          : (b.scenario_value ?? b.estimated_value) - (a.scenario_value ?? a.estimated_value),
+      )
       .slice(0, 5);
   }, [mapData, mode, scenario]);
+  const selectedPresetName = useMemo(() => {
+    if (!summary?.presets.length) return "Personalizzato";
+    const match = summary.presets.find(
+      (preset) =>
+        preset.traffic_reduction === controls.traffic_reduction &&
+        preset.wind_multiplier === controls.wind_multiplier &&
+        preset.rain_event === controls.rain_event &&
+        preset.focus_zone === controls.focus_zone &&
+        preset.green_improvement === controls.green_improvement,
+    );
+    return match?.name ?? "Personalizzato";
+  }, [controls, summary]);
+  const bestZone = scenario?.zone_summary
+    .filter((zone) => Number.isFinite(zone.mean_delta))
+    .sort((a, b) => a.mean_delta - b.mean_delta)[0];
 
   return (
-    <main className="app">
+    <main className="app" data-testid="air-twin-cockpit">
       <aside className="sidebar">
-        <div>
-          <p className="eyebrow">UNISA Air Twin</p>
+        <div className="brand-block">
+          <div className="brand-mark">
+            <Leaf size={18} />
+          </div>
           <h1>Operazioni ambientali campus</h1>
+          <p>UNISA Air Quality Digital Twin</p>
         </div>
 
-        <section className="control-group">
+        <section className="control-group primary-controls">
           <label>
             Inquinante
             <select value={pollutant} onChange={(event) => setPollutant(event.target.value)}>
@@ -401,6 +552,9 @@ function App() {
           <button className={mode === "baseline" ? "active" : ""} onClick={() => setMode("baseline")}>
             <Map size={16} /> Baseline
           </button>
+          <button className={mode === "scenario" ? "active" : ""} onClick={() => setMode("scenario")}>
+            <Gauge size={16} /> Scenario
+          </button>
           <button className={mode === "delta" ? "active" : ""} onClick={() => setMode("delta")}>
             <Activity size={16} /> Delta
           </button>
@@ -411,20 +565,21 @@ function App() {
             <SlidersHorizontal size={16} />
             Scenario
           </div>
-          <select onChange={(event) => selectedPreset(event.target.value)} defaultValue="Personalizzato">
+          <select onChange={(event) => selectedPreset(event.target.value)} value={selectedPresetName}>
             {summary?.presets.map((preset) => (
               <option key={preset.name}>{preset.name}</option>
             ))}
           </select>
           <label>
             Riduzione traffico <span>{Math.round(controls.traffic_reduction * 100)}%</span>
-            <input
+          <input
               type="range"
               min="0"
               max="0.5"
               step="0.05"
               value={controls.traffic_reduction}
-              onChange={(event) => setControls({ ...controls, traffic_reduction: Number(event.target.value) })}
+              onChange={(event) => updateScenarioControls({ ...controls, traffic_reduction: Number(event.target.value) })}
+              onInput={(event) => updateScenarioControls({ ...controls, traffic_reduction: Number(event.currentTarget.value) })}
             />
           </label>
           <label>
@@ -435,7 +590,8 @@ function App() {
               max="2"
               step="0.1"
               value={controls.wind_multiplier}
-              onChange={(event) => setControls({ ...controls, wind_multiplier: Number(event.target.value) })}
+              onChange={(event) => updateScenarioControls({ ...controls, wind_multiplier: Number(event.target.value) })}
+              onInput={(event) => updateScenarioControls({ ...controls, wind_multiplier: Number(event.currentTarget.value) })}
             />
           </label>
           <label>
@@ -446,14 +602,15 @@ function App() {
               max="0.5"
               step="0.05"
               value={controls.green_improvement}
-              onChange={(event) => setControls({ ...controls, green_improvement: Number(event.target.value) })}
+              onChange={(event) => updateScenarioControls({ ...controls, green_improvement: Number(event.target.value) })}
+              onInput={(event) => updateScenarioControls({ ...controls, green_improvement: Number(event.currentTarget.value) })}
             />
           </label>
           <label>
             Zona
             <select
               value={controls.focus_zone}
-              onChange={(event) => setControls({ ...controls, focus_zone: event.target.value })}
+              onChange={(event) => updateScenarioControls({ ...controls, focus_zone: event.target.value })}
             >
               {summary?.zones.map((zone) => (
                 <option key={zone.id} value={zone.id}>
@@ -466,7 +623,7 @@ function App() {
             Finestra
             <select
               value={controls.window_label}
-              onChange={(event) => setControls({ ...controls, window_label: event.target.value })}
+              onChange={(event) => updateScenarioControls({ ...controls, window_label: event.target.value })}
             >
               {windows.map((item) => (
                 <option key={item}>{item}</option>
@@ -475,10 +632,24 @@ function App() {
           </label>
           <button
             className={controls.rain_event ? "rain-toggle active" : "rain-toggle"}
-            onClick={() => setControls({ ...controls, rain_event: !controls.rain_event })}
+            onClick={() => updateScenarioControls({ ...controls, rain_event: !controls.rain_event })}
           >
             <CloudRain size={16} /> Evento pioggia
           </button>
+        </section>
+        <section className="scenario-readout">
+          <div>
+            <Route size={16} />
+            <span>Traffico -{Math.round(controls.traffic_reduction * 100)}%</span>
+          </div>
+          <div>
+            <Wind size={16} />
+            <span>Vento {controls.wind_multiplier.toFixed(1)}x</span>
+          </div>
+          <div>
+            <Leaf size={16} />
+            <span>Verde +{Math.round(controls.green_improvement * 100)}%</span>
+          </div>
         </section>
       </aside>
 
@@ -489,6 +660,8 @@ function App() {
             <strong>{pollutant.toUpperCase()} · {formatTime(timestamp)}</strong>
           </div>
           <div className="status-actions">
+            <span className="status-chip">Open data</span>
+            <span className="status-chip">{mapData?.snapshot.length ?? 0} sensori</span>
             {isPending && <span className="loading">Aggiornamento</span>}
             <button onClick={() => window.location.reload()} aria-label="Refresh">
               <RefreshCcw size={16} />
@@ -504,33 +677,60 @@ function App() {
 
         <div className="map-stage">
           <CampusMap mapData={mapData} scenario={scenario} mode={mode} />
+          <div className="map-toolbar" aria-label="Map layers">
+            <span className={mode === "baseline" ? "active" : ""}>IDW</span>
+            <span>OSM</span>
+            <span>ARPAC</span>
+            <span className={mode === "scenario" ? "active scenario" : ""}>Scenario</span>
+            <span className={mode === "delta" ? "active delta" : ""}>Delta</span>
+          </div>
+          <div className="map-compass">
+            <Compass size={18} />
+            <span>N</span>
+          </div>
           <div className="map-caption">
             <Layers size={16} />
-            {mode === "delta" ? "Delta scenario per sensore e zona" : "Baseline IDW su sensori virtuali"}
+            {mode === "delta"
+              ? "Delta scenario per sensore e zona"
+              : mode === "scenario"
+                ? "Scenario simulato dopo i controlli"
+                : "Baseline IDW su sensori virtuali"}
+          </div>
+          <div className="map-scale">
+            <span />
+            <b>500 m</b>
           </div>
         </div>
       </section>
 
       <aside className="inspector">
         <section className="metrics-grid">
-          <div>
-            <span>Delta medio</span>
-            <strong>{scenario?.summary.mean_delta.toFixed(2) ?? "n/d"}</strong>
-          </div>
-          <div>
-            <span>Sensori migliorati</span>
-            <strong>
-              {scenario ? `${scenario.summary.improved_sensors}/${scenario.summary.rows}` : "n/d"}
-            </strong>
-          </div>
-          <div>
-            <span>Righe modello</span>
-            <strong>{summary?.rows.toLocaleString("it-IT") ?? "n/d"}</strong>
-          </div>
-          <div>
-            <span>Stazioni ARPAC</span>
-            <strong>{summary?.stations ?? "n/d"}</strong>
-          </div>
+          <MetricTile
+            icon={<Gauge size={17} />}
+            label="Delta medio"
+            value={formatNumber(scenario?.summary.mean_delta, 2)}
+            hint={bestZone ? `Zona migliore: ${bestZone.zone}` : undefined}
+            tone={deltaTone(scenario?.summary.mean_delta)}
+          />
+          <MetricTile
+            icon={<Activity size={17} />}
+            label="Sensori migliorati"
+            value={scenario ? `${scenario.summary.improved_sensors}/${scenario.summary.rows}` : "n/d"}
+            hint="scenario attivo"
+            tone={scenario?.summary.improved_sensors ? "good" : "neutral"}
+          />
+          <MetricTile
+            icon={<BarChart3 size={17} />}
+            label="Righe modello"
+            value={summary?.rows.toLocaleString("it-IT") ?? "n/d"}
+            hint="serie oraria"
+          />
+          <MetricTile
+            icon={<RadioTower size={17} />}
+            label="Stazioni ARPAC"
+            value={`${summary?.stations ?? "n/d"}`}
+            hint="fonte ufficiale"
+          />
         </section>
 
         <section>
@@ -546,7 +746,7 @@ function App() {
           <div className="section-title">Sensori chiave</div>
           <div className="sensor-list">
             {topSensors.map((sensor) => (
-              <div key={sensor.sensor_name} className="sensor-row">
+              <div key={sensor.sensor_name} className={`sensor-row ${deltaTone(sensor.delta)}`}>
                 <div>
                   <strong>{sensor.sensor_name}</strong>
                   <span>{sensor.zone}</span>
@@ -554,8 +754,21 @@ function App() {
                 <b>
                   {mode === "delta" && sensor.delta !== undefined
                     ? `${sensor.delta > 0 ? "+" : ""}${sensor.delta.toFixed(2)}`
-                    : sensor.estimated_value.toFixed(1)}
+                    : (sensor.scenario_value ?? sensor.estimated_value).toFixed(1)}
                 </b>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section>
+          <div className="section-title">Delta per zona</div>
+          <div className="zone-list">
+            {(scenario?.zone_summary ?? []).slice(0, 4).map((zone) => (
+              <div key={zone.zone} className="zone-row">
+                <span>{zone.zone}</span>
+                <b>{zone.mean_delta > 0 ? "+" : ""}{zone.mean_delta.toFixed(2)}</b>
+                <i style={{ width: `${Math.min(Math.abs(zone.mean_delta) * 34, 100)}%` }} />
               </div>
             ))}
           </div>
