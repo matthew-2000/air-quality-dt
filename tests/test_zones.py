@@ -13,4 +13,4 @@ def test_create_campus_zones_and_entities(tmp_path) -> None:
     assert (tmp_path / "campus_zones.geojson").exists()
     assert (tmp_path / "digital_twin_entities.json").exists()
     assert any(entity["type"] == "CampusZone" for entity in entities["entities"])
-    assert any(entity["type"] == "VirtualSensor" for entity in entities["entities"])
+    assert all(entity["type"] != "VirtualSensor" for entity in entities["entities"])

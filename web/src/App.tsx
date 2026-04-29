@@ -57,15 +57,18 @@ type Preset = {
 };
 type Summary = {
   project: string;
+  source?: string;
   campus: { name: string; latitude: number; longitude: number };
   pollutants: string[];
   default_pollutant: string;
   latest_timestamp: string | null;
+  latest_received_at?: string | null;
   rows: number;
+  sensors: number;
   stations: number;
   zones: { id: string; label: string }[];
   presets: Preset[];
-  validation: { rows?: number; overall?: { mae?: number; bias?: number } };
+  ingestion?: { rows?: number; sensors?: number; source?: string; generated_at?: string };
   warnings: unknown[];
 };
 type MapPayload = {
@@ -99,10 +102,12 @@ type Tone = "neutral" | "good" | "bad";
 const windows = ["Solo ora selezionata", "Mattina", "Pranzo", "Pomeriggio", "Giornata intera"];
 
 const pollutantLabels: Record<string, string> = {
+  pm1: "Particolato PM1",
   pm10: "Particolato PM10",
+  pm25: "Particolato PM2.5",
   "pm2.5": "Particolato PM2.5",
-  no2: "Biossido di azoto",
-  o3: "Ozono",
+  voc_index: "Indice VOC",
+  nox_index: "Indice NOx",
 };
 
 const defaultControls: ScenarioControls = {
@@ -307,7 +312,7 @@ function CampusMap({
             radius={6}
             pathOptions={{ color: "#ffffff", fillColor: "#70869a", fillOpacity: 0.9, weight: 2 }}
           >
-            <Popup>{station.station_name ?? station.name ?? "Stazione ARPAC"}</Popup>
+            <Popup>{station.station_name ?? station.name ?? "Sensore di riferimento"}</Popup>
           </CircleMarker>
         ))}
         {sensors.map((sensor, index) => {
@@ -403,20 +408,23 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [controls, setControls] = useState<ScenarioControls>(defaultControls);
+  const [refreshTick, setRefreshTick] = useState(0);
 
   useEffect(() => {
-    getJson<Summary>("/api/summary")
+    getJson<{ status: string }>("/api/refresh", { method: "POST" })
+      .catch(() => undefined)
+      .then(() => getJson<Summary>("/api/summary"))
       .then((payload) => {
         setSummary(payload);
-        setPollutant(payload.default_pollutant);
+        setPollutant((current) => current || payload.default_pollutant);
         setTimestamp(payload.latest_timestamp);
-        const preset = payload.presets[0];
-        if (preset) {
-          const { name: _name, ...presetControls } = preset;
-          setControls((current) => ({ ...current, ...presetControls }));
-        }
       })
       .catch((reason) => setError(reason.message));
+  }, [refreshTick]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setRefreshTick((current) => current + 1), 30000);
+    return () => window.clearInterval(timer);
   }, []);
 
   useEffect(() => {
@@ -427,7 +435,7 @@ function App() {
         setTimestamp((current) => (current && payload.timestamps.includes(current) ? current : payload.timestamps.at(-1) ?? null));
       })
       .catch((reason) => setError(reason.message));
-  }, [pollutant]);
+  }, [pollutant, refreshTick]);
 
   useEffect(() => {
     if (!pollutant || !timestamp) return;
@@ -447,7 +455,7 @@ function App() {
         })
         .catch((reason) => setError(reason.message));
     });
-  }, [pollutant, timestamp, controls]);
+  }, [pollutant, timestamp, controls, refreshTick]);
 
   const zoneLabels = useMemo(() => {
     const next = new Map<string, string>();
@@ -629,7 +637,7 @@ function App() {
             <p>Vento {controls.wind_multiplier.toFixed(1)}x</p>
             <p>Traffico -{Math.round(controls.traffic_reduction * 100)}%</p>
           </div>
-          <button className="refresh-button" onClick={() => window.location.reload()}>
+          <button className="refresh-button" onClick={() => setRefreshTick((current) => current + 1)}>
             <RefreshCcw size={16} />
             Aggiorna dati
           </button>
@@ -648,7 +656,7 @@ function App() {
               <Clock3 size={15} />
               {formatTime(timestamp)}
             </span>
-            <span className="meta-chip">Open data</span>
+            <span className="meta-chip">MQTT UNISA</span>
             <span className="meta-chip">{mapData?.snapshot.length ?? 0} sensori</span>
             {isPending ? <span className="meta-chip loading">Aggiornamento</span> : null}
           </div>
@@ -771,7 +779,7 @@ function App() {
                 <div key={zone.zone} className="zone-row">
                   <div>
                     <strong>{zone.label}</strong>
-                    <span>{zone.sensors} sensori virtuali</span>
+                    <span>{zone.sensors} sensori reali</span>
                   </div>
                   <div className="zone-value">
                     <b className={deltaTone(zone.mean_delta)}>{formatSignedNumber(zone.mean_delta, 2)}</b>
@@ -787,7 +795,7 @@ function App() {
               <ShieldCheck size={18} />
               <div>
                 <h2>Affidabilita dei dati</h2>
-                <p>Una lettura sintetica di copertura, fonti aperte e validazione.</p>
+                <p>Copertura dei sensori reali UNISA e freschezza dei dati MQTT.</p>
               </div>
             </div>
             <div className="reliability-body">
@@ -804,14 +812,9 @@ function App() {
                   {mapData?.snapshot.length ?? 0} sensori disponibili.
                 </p>
                 <ul>
-                  <li>Stazioni ARPAC usate: {summary?.stations ?? "n/d"}</li>
-                  <li>Righe modello disponibili: {summary?.rows.toLocaleString("it-IT") ?? "n/d"}</li>
-                  <li>
-                    Validazione open-data:{" "}
-                    {summary?.validation?.overall?.mae !== undefined && summary.validation.overall.mae !== null
-                      ? `MAE ${summary.validation.overall.mae.toFixed(2)}`
-                      : "n/d"}
-                  </li>
+                  <li>Sensori fisici registrati: {summary?.sensors ?? "n/d"}</li>
+                  <li>Misure reali disponibili: {summary?.rows.toLocaleString("it-IT") ?? "n/d"}</li>
+                  <li>Ultima ricezione MQTT: {formatTime(summary?.latest_received_at ?? null)}</li>
                 </ul>
               </div>
             </div>

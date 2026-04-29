@@ -5,7 +5,6 @@ from typing import Any
 
 import pandas as pd
 
-from unisa_air_twin.arpac import clean_air_quality
 from unisa_air_twin.config import Settings, load_settings
 from unisa_air_twin.gis import (
     available_timestamps,
@@ -19,12 +18,10 @@ from unisa_air_twin.gis import (
     window_frame,
     zone_delta_summary,
 )
-from unisa_air_twin.model import estimate_campus_air_quality
+from unisa_air_twin.live_sensors import build_realtime_dataset, write_real_sensor_geojson
 from unisa_air_twin.scenario import apply_scenario, scenario_summary
-from unisa_air_twin.sensors import create_virtual_sensors
 from unisa_air_twin.storage import geojson_points_to_frame, read_geojson, read_table
 from unisa_air_twin.utils import read_json
-from unisa_air_twin.validation import leave_one_station_out_validation
 from unisa_air_twin.zones import ensure_twin_layers
 
 SCENARIO_PRESETS: dict[str, dict[str, Any]] = {
@@ -90,6 +87,7 @@ def format_zone(zone: str) -> str:
         "servizi": "servizi",
         "studio": "studio",
         "verde": "verde",
+        "campus": "campus",
     }
     return labels.get(zone, zone)
 
@@ -127,20 +125,19 @@ class TwinDataService:
         return self._loaded
 
     def _load_data(self) -> dict[str, Any]:
-        sensors = geojson_points_to_frame(self.settings.processed_dir / "campus_virtual_sensors.geojson")
+        sensors = geojson_points_to_frame(self.settings.processed_dir / "campus_real_sensors.geojson")
         if sensors.empty:
-            sensors = create_virtual_sensors(self.settings)
+            sensors = write_real_sensor_geojson(self.settings)
         if not (self.settings.processed_dir / "campus_zones.geojson").exists():
             ensure_twin_layers(self.settings)
 
         estimates = read_table(self.settings.processed_dir / "campus_air_quality_estimates.parquet")
         if estimates.empty:
-            clean_air_quality(self.settings)
-            estimates = estimate_campus_air_quality(self.settings)
+            estimates = build_realtime_dataset(self.settings)
         if "timestamp" in estimates.columns:
             estimates["timestamp"] = pd.to_datetime(estimates["timestamp"], errors="coerce")
 
-        stations = read_table(self.settings.processed_dir / "arpac_station_metadata.parquet")
+        stations = pd.DataFrame()
         schema_report = read_json(self.settings.processed_dir / "schema_report.json", default={"warnings": []})
         layers = {
             "buildings": read_geojson(self.settings.processed_dir / "campus_buildings.geojson"),
@@ -151,17 +148,10 @@ class TwinDataService:
         }
         zones_geojson = read_geojson(self.settings.processed_dir / "campus_zones.geojson")
         entities = read_json(self.settings.processed_dir / "digital_twin_entities.json", default={"entities": []})
-        validation = read_table(self.settings.processed_dir / "model_validation.parquet")
-        validation_summary = read_json(
-            self.settings.processed_dir / "model_validation_summary.json",
-            default={"rows": 0, "overall": {"mae": None, "bias": None}, "by_pollutant": []},
+        ingestion_summary = read_json(
+            self.settings.processed_dir / "realtime_ingestion_summary.json",
+            default={"rows": 0, "sensors": 0, "pollutants": []},
         )
-        if validation.empty and not estimates.empty and not stations.empty:
-            validation = leave_one_station_out_validation(self.settings)
-            validation_summary = read_json(
-                self.settings.processed_dir / "model_validation_summary.json",
-                default={"rows": 0, "overall": {"mae": None, "bias": None}, "by_pollutant": []},
-            )
 
         return {
             "estimates": estimates,
@@ -171,10 +161,7 @@ class TwinDataService:
             "layers": layers,
             "zones_geojson": zones_geojson,
             "entities": entities if isinstance(entities, dict) else {"entities": []},
-            "validation": validation,
-            "validation_summary": validation_summary
-            if isinstance(validation_summary, dict)
-            else {"rows": 0, "by_pollutant": []},
+            "ingestion_summary": ingestion_summary if isinstance(ingestion_summary, dict) else {},
         }
 
     def summary(self) -> dict[str, Any]:
@@ -186,8 +173,15 @@ class TwinDataService:
         timestamps = self.timestamps(default_pollutant)
         latest_timestamp = timestamps[-1] if timestamps else None
         zones = sorted(estimates["zone"].dropna().unique()) if "zone" in estimates.columns and not estimates.empty else []
+        sensors = data["sensors"]
+        latest_received = (
+            pd.to_datetime(estimates["received_at"], errors="coerce").max().strftime("%Y-%m-%dT%H:%M:%S")
+            if "received_at" in estimates.columns and not estimates.empty
+            else latest_timestamp
+        )
         return {
             "project": "UNISA Air Quality Digital Twin",
+            "source": "UNISA Live MQTT",
             "campus": {
                 "name": self.settings.campus.get("name", "Campus di Fisciano"),
                 "latitude": self.settings.campus.get("fallback_latitude"),
@@ -196,11 +190,13 @@ class TwinDataService:
             "pollutants": pollutants,
             "default_pollutant": default_pollutant,
             "latest_timestamp": latest_timestamp,
+            "latest_received_at": latest_received,
             "rows": int(len(estimates)),
+            "sensors": int(len(sensors)),
             "stations": int(len(stations)),
             "zones": [{"id": "all", "label": format_zone("all")}, *[{"id": zone, "label": format_zone(zone)} for zone in zones]],
             "presets": [{"name": name, **values} for name, values in SCENARIO_PRESETS.items()],
-            "validation": data["validation_summary"],
+            "ingestion": data["ingestion_summary"],
             "warnings": data["schema_report"].get("warnings", []),
         }
 

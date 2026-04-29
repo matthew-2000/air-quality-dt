@@ -48,10 +48,10 @@ def _fallback_geojson(settings: Settings) -> None:
     lon = settings.campus["fallback_longitude"]
     processed = settings.processed_dir
     provenance = {
-        "source": "synthetic_fallback",
+        "source": "offline_placeholder",
         "source_url": "OpenStreetMap unavailable in local run",
         "downloaded_at": utc_now_iso(),
-        "is_synthetic": True,
+        "is_real": False,
     }
     _write_geojson(
         processed / "campus_buildings.geojson",
@@ -146,7 +146,7 @@ def download_osm(settings: Settings, force: bool = False) -> None:
             gdf["source"] = "openstreetmap"
             gdf["source_url"] = "https://www.openstreetmap.org/"
             gdf["downloaded_at"] = utc_now_iso()
-            gdf["is_synthetic"] = False
+            gdf["is_real"] = True
             gdf.to_file(settings.processed_dir / filename, driver="GeoJSON")
 
         graph = ox.graph_from_place(place_name, network_type="drive", simplify=True)
@@ -155,7 +155,7 @@ def download_osm(settings: Settings, force: bool = False) -> None:
         edges["source"] = "openstreetmap"
         edges["source_url"] = "https://www.openstreetmap.org/"
         edges["downloaded_at"] = utc_now_iso()
-        edges["is_synthetic"] = False
+        edges["is_real"] = True
         edges.to_file(settings.processed_dir / "campus_roads.geojson", driver="GeoJSON")
         LOGGER.info("Downloaded OSM campus layers.")
     except Exception as exc:

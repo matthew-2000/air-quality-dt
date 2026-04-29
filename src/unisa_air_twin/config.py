@@ -13,10 +13,8 @@ class Settings(BaseModel):
     project: dict[str, Any]
     paths: dict[str, str]
     campus: dict[str, Any]
-    arpac: dict[str, Any]
-    weather: dict[str, Any]
+    live_sensors: dict[str, Any] = Field(default_factory=dict)
     model: dict[str, Any]
-    validation: dict[str, Any] = Field(default_factory=dict)
 
     raw_dir: Path = Field(default_factory=lambda: project_path("data/raw"))
     processed_dir: Path = Field(default_factory=lambda: project_path("data/processed"))

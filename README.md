@@ -1,205 +1,74 @@
-# UNISA Air Quality Digital Twin - MVP
+# UNISA Air Quality Digital Twin
 
-This project is a first working prototype of an Urban Digital Twin for air quality around the University of Salerno, Campus di Fisciano.
+Dashboard e API per leggere dati reali dai sensori fisici UNISA sul Campus di Fisciano.
 
-It downloads public data where possible, prepares geospatial and time-series datasets, creates virtual campus sensors, estimates local air quality from nearby ARPAC stations plus simple weather and mobility proxies, and exposes both the original Streamlit dashboard and a newer FastAPI + React cockpit.
+Il repository non contiene dettagli del broker MQTT, credenziali, topic operativi o nomi di provider. Tutte le informazioni di connessione devono arrivare da variabili d'ambiente o da secret manager.
 
-For non-technical users, start from [docs/USER_GUIDE.md](docs/USER_GUIDE.md).
-For the model and GIS assumptions, read [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
+## Configurazione Privata
 
-## Why this is a Digital Twin MVP
-
-The MVP links a physical place (UNISA Fisciano campus) with a live-ish data representation:
-
-- campus context from OpenStreetMap;
-- official regional air-quality data from ARPAC Campania Open Data;
-- weather from the UNISA weather page when discoverable, otherwise Open-Meteo fallback;
-- virtual sensors placed around meaningful campus zones;
-- a transparent estimation model and scenario controls.
-- open-data validation against ARPAC stations and explicit uncertainty labels.
-
-It is intentionally simple: no Kubernetes, no microservices, no PostGIS, no game engine, and no complex 3D.
-
-## Data sources
-
-- ARPAC Campania Open Data portal: <https://dati.arpacampania.it/>
-- ARPAC hourly raw air quality: <https://dati.arpacampania.it/dataset/dati-grezzi-orari-qualita-aria>
-- ARPAC validated daily air quality: <https://dati.arpacampania.it/dataset/dati-rqa-giornalieri-validati>
-- ARPAC historical monitoring: <https://dati.arpacampania.it/dataset/dati-monitoraggio-qualita-aria>
-- ARPAC station metadata: <https://dati.arpacampania.it/dataset/rete-di-monitoraggio-della-qualita-dell-aria>
-- UNISA weather reference page: <https://web.unisa.it/servizi-on-line/stazione-meteo>
-- Open-Meteo fallback for Fisciano coordinates: latitude `40.771`, longitude `14.790`
-- OpenStreetMap via OSMnx for campus buildings, roads, green areas, parking, and transport points
-- UNISA campus map reference for names/POIs: <https://web.unisa.it/vivere-il-campus/unisa-experience/campus-map>
-
-The downloader first tries CKAN `package_show` endpoints for ARPAC datasets, then scrapes dataset HTML pages for resource links. Raw files are cached under `data/raw/arpac/` and are not downloaded again unless `--force` is passed.
-
-## Installation
-
-Python 3.11+ is required.
+Imposta le variabili d'ambiente fuori dal repository:
 
 ```bash
-python3 -m pip install -e .
+export UNISA_MQTT_HOST='...'
+export UNISA_MQTT_PORT='...'
+export UNISA_MQTT_USERNAME='...'
+export UNISA_MQTT_PASSWORD='...'
+export UNISA_MQTT_TOPIC='...'
 ```
 
-Alternatively, install from `requirements.txt`:
+I dati raw locali sono ignorati da git e vanno copiati sotto:
+
+- `data/raw/live_sensors/sensor_catalog.json`
+- `data/raw/live_sensors/mqtt_data.csv`
+- `data/raw/live_sensors/mqtt_raw.jsonl`
+
+## Pipeline
+
+Build offline dai raw già raccolti:
 
 ```bash
-python3 -m pip install -r requirements.txt
+python3 scripts/build_datasets.py
 ```
 
-or:
+Ingestione live in cicli continui:
 
 ```bash
-make install
+python3 scripts/ingest_mqtt.py --watch --duration 30 --interval 5
 ```
 
-If your system provides `python` instead of `python3`, run:
+Output principali:
 
-```bash
-make PYTHON=python install
-```
+- `data/processed/campus_real_sensors.geojson`
+- `data/processed/real_sensor_metadata.parquet`
+- `data/processed/real_sensor_observations.parquet`
+- `data/processed/campus_air_quality_estimates.parquet`
+- `data/processed/realtime_ingestion_summary.json`
 
-## How to run
+## Avvio
 
-Run the full pipeline:
-
-```bash
-python scripts/run_pipeline.py
-```
-
-If your shell does not have a `python` command, use:
-
-```bash
-python3 scripts/run_pipeline.py
-```
-
-Start the original Streamlit dashboard:
-
-```bash
-streamlit run app/streamlit_app.py
-```
-
-If the `streamlit` executable is not on your `PATH`, use the equivalent module form:
-
-```bash
-python3 -m streamlit run app/streamlit_app.py
-```
-
-Start the refactored API:
+API FastAPI:
 
 ```bash
 python3 -m uvicorn api.main:app --reload
 ```
 
-Start the React cockpit in another terminal:
+Cockpit React:
 
 ```bash
-npm --prefix web install
 npm --prefix web run dev
 ```
 
-Useful Make commands:
+Dashboard Streamlit legacy:
 
 ```bash
-make data
-make app
-make api
-make web
-make test
-make lint
+python3 -m streamlit run app/streamlit_app.py
 ```
 
-The React app expects the API at `http://localhost:8000`. Set `VITE_API_BASE` before `npm --prefix web run dev` if you run the API elsewhere.
+## Real Time
 
-## Expected outputs
+L'app è predisposta per aggiornamenti live, ma servono due processi:
 
-Processed outputs are written under `data/processed/`:
+- un processo di ingestione MQTT continuo che ascolta il broker e aggiorna i parquet;
+- API/UI attive, con refresh automatico o manuale dei dati.
 
-- `air_quality_observations.parquet`
-- `arpac_station_metadata.parquet`
-- `weather_hourly.parquet`
-- `campus_buildings.geojson`
-- `campus_roads.geojson`
-- `campus_green.geojson`
-- `campus_transport.geojson`
-- `campus_parking.geojson`
-- `campus_virtual_sensors.geojson`
-- `campus_zones.geojson`
-- `digital_twin_entities.json`
-- `campus_air_quality_estimates.parquet`
-- `model_validation.parquet`
-- `model_validation_summary.json`
-- `schema_report.json` when schema warnings occur
-
-All processed tables include provenance fields where applicable:
-
-- `source`
-- `source_url`
-- `downloaded_at`
-- `is_synthetic`
-
-If a public source cannot be downloaded or parsed, the pipeline creates a clearly labeled `source="synthetic_fallback"` dataset so the dashboard still runs after a clean clone. The code never silently fakes official measurements.
-
-## Dashboard
-
-The dashboard title is:
-
-> UNISA Air Quality Digital Twin - MVP
-
-Sections:
-
-- GIS operativo: layer OSM attivabili, sensori virtuali, stazioni ARPAC, timeline oraria e heatmap IDW sul campus.
-- Scenario builder: preset narrativi, zona di intervento, finestra temporale, confronto preset, mappa scenario, mappa delta per zona e componenti del modello.
-- Digital Twin: entità del campus, zone funzionali, sensori virtuali, mappa asset e layer di affidabilità spaziale.
-- Serie temporali: pollutant and sensor selectors.
-- Guida e metodologia: guida in linguaggio semplice, legenda, fonti dati, logica del modello e limiti.
-- Data quality: download/model metadata, row counts, station counts, schema warnings.
-
-## Refactored Web App
-
-The new app keeps the Python modeling layer under `src/unisa_air_twin/`, adds a thin HTTP layer in `api/`, and places the product UI in `web/`.
-
-- `api/main.py`: FastAPI endpoints for health, summary, timestamps, map payloads, scenario simulation, and time series.
-- `src/unisa_air_twin/ui_data.py`: shared data service used by the API and suitable for future Streamlit cleanup.
-- `web/`: React/Vite cockpit with map-first layout, scenario controls, delta view, timeline, and operational metrics.
-
-## Model
-
-The estimation model is deliberately transparent:
-
-```text
-estimated_value =
-    inverse_distance_weighted_ARPAC_base
-    + traffic_factor * traffic_index
-    - green_factor * green_index
-    + weather_adjustment
-```
-
-Traffic, green, wind, and rain coefficients are configured in `config/settings.yaml`.
-
-## Open-data validation
-
-Because the project cannot assume physical campus sensors or closed datasets, model quality is checked with a leave-one-station-out validation on recent ARPAC open data:
-
-1. one ARPAC station is temporarily held out;
-2. its pollutant value is reconstructed from the other available ARPAC stations with IDW;
-3. observed and predicted values are compared with MAE, bias, and p90 absolute error.
-
-Campus estimates also include `uncertainty_score`, `confidence_label`, `nearest_station_km`, and station-count fields so the dashboard can show where estimates are more or less supported by open observations.
-
-The validation window is controlled by `validation.max_hours` in `config/settings.yaml`. Pollutant values outside the configured physical sanity range are treated as missing before modeling and validation, so numeric missing-data flags do not distort the metrics.
-
-## Limitations
-
-This is a demonstrative MVP, not an official health or regulatory model. It does not replace ARPAC measurements. Virtual sensor coordinates are synthetic unless explicitly improved later. Weather fallback uses Open-Meteo when the UNISA page does not expose a reliable machine-readable endpoint. The atmospheric model is intentionally simple and should be validated before any scientific or operational use.
-
-## Next steps
-
-- Add real low-cost sensors on campus.
-- Validate estimates against ARPAC observations.
-- Improve open-data validation and uncertainty calibration.
-- Add MQTT ingestion for streaming sensor data.
-- Add an NGSI-LD-compatible entity model.
-- Use PostGIS/TimescaleDB later when the prototype grows.
-- Improve the atmospheric and dispersion model.
+La UI React interroga periodicamente l'API; per aggiornamenti push veri via WebSocket/SSE serve un ulteriore step architetturale.

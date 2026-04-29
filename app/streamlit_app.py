@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -11,7 +10,6 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from unisa_air_twin.arpac import clean_air_quality
 from unisa_air_twin.config import load_settings
 from unisa_air_twin.gis import (
     available_timestamps,
@@ -25,12 +23,10 @@ from unisa_air_twin.gis import (
     window_frame,
     zone_delta_summary,
 )
-from unisa_air_twin.model import estimate_campus_air_quality
+from unisa_air_twin.live_sensors import build_realtime_dataset, write_real_sensor_geojson
 from unisa_air_twin.scenario import apply_scenario, scenario_summary
-from unisa_air_twin.sensors import create_virtual_sensors
 from unisa_air_twin.storage import geojson_points_to_frame, read_geojson, read_table
 from unisa_air_twin.utils import read_json
-from unisa_air_twin.validation import leave_one_station_out_validation
 from unisa_air_twin.zones import ensure_twin_layers
 
 st.set_page_config(page_title="UNISA Air Quality Digital Twin - MVP", layout="wide")
@@ -84,19 +80,18 @@ st.markdown(
 
 
 @st.cache_data(show_spinner=False)
-def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict, dict[str, dict], dict, dict, pd.DataFrame, dict]:
+def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict, dict[str, dict], dict, dict]:
     settings = load_settings()
-    sensors = geojson_points_to_frame(settings.processed_dir / "campus_virtual_sensors.geojson")
+    sensors = geojson_points_to_frame(settings.processed_dir / "campus_real_sensors.geojson")
     if sensors.empty:
-        sensors = create_virtual_sensors(settings)
+        sensors = write_real_sensor_geojson(settings)
     if not (settings.processed_dir / "campus_zones.geojson").exists():
         ensure_twin_layers(settings)
     estimates = read_table(settings.processed_dir / "campus_air_quality_estimates.parquet")
     if estimates.empty:
-        clean_air_quality(settings)
-        estimates = estimate_campus_air_quality(settings)
+        estimates = build_realtime_dataset(settings)
     estimates["timestamp"] = pd.to_datetime(estimates["timestamp"], errors="coerce")
-    stations = read_table(settings.processed_dir / "arpac_station_metadata.parquet")
+    stations = pd.DataFrame()
     schema_report = read_json(settings.processed_dir / "schema_report.json", default={"warnings": []})
     layers = {
         "buildings": read_geojson(settings.processed_dir / "campus_buildings.geojson"),
@@ -107,17 +102,6 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict, dict[st
     }
     zones_geojson = read_geojson(settings.processed_dir / "campus_zones.geojson")
     entities = read_json(settings.processed_dir / "digital_twin_entities.json", default={"entities": []})
-    validation = read_table(settings.processed_dir / "model_validation.parquet")
-    validation_summary = read_json(
-        settings.processed_dir / "model_validation_summary.json",
-        default={"rows": 0, "overall": {"mae": None, "bias": None}, "by_pollutant": []},
-    )
-    if validation.empty and not estimates.empty and not stations.empty:
-        validation = leave_one_station_out_validation(settings)
-        validation_summary = read_json(
-            settings.processed_dir / "model_validation_summary.json",
-            default={"rows": 0, "overall": {"mae": None, "bias": None}, "by_pollutant": []},
-        )
     return (
         estimates,
         sensors,
@@ -126,8 +110,6 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict, dict[st
         layers,
         zones_geojson,
         entities if isinstance(entities, dict) else {"entities": []},
-        validation,
-        validation_summary if isinstance(validation_summary, dict) else {"rows": 0, "by_pollutant": []},
     )
 
 
@@ -296,14 +278,14 @@ def render_legend(delta: bool = False) -> None:
             ("#2a915f", "miglioramento stimato"),
             ("#efefdf", "variazione piccola"),
             ("#c44844", "peggioramento stimato"),
-            ("#2346a5", "stazione ARPAC"),
+            ("#2346a5", "sensore di riferimento"),
         ]
     else:
         rows = [
             ("#2d845f", "valori più bassi"),
             ("#f0b241", "valori intermedi"),
             ("#c8493d", "valori più alti"),
-            ("#2346a5", "stazione ARPAC"),
+            ("#2346a5", "sensore di riferimento"),
         ]
     html = "".join(
         f"<div class='legend-row'><span class='legend-swatch' style='background:{color}'></span>{label}</div>"
@@ -316,7 +298,7 @@ def render_disclaimer() -> None:
     st.markdown(
         """
         <div class="warning-box">
-        Questo prototipo non fornisce misure ufficiali e non sostituisce ARPAC.
+        Questo prototipo mostra misure reali da sensori UNISA, ma non è un servizio sanitario o regolatorio ufficiale.
         Usalo per esplorare scenari e comprendere relazioni spaziali, non per decisioni sanitarie o regolatorie.
         </div>
         """,
@@ -339,7 +321,7 @@ def format_zone(zone: str) -> str:
 
 
 settings = load_settings()
-estimates, sensors, stations, schema_report, osm_layers, zones_geojson, twin_entities, validation, validation_summary = load_data()
+estimates, sensors, stations, schema_report, osm_layers, zones_geojson, twin_entities = load_data()
 pollutants = sorted(estimates["pollutant"].dropna().unique()) if not estimates.empty else ["pm10"]
 
 with st.sidebar:
@@ -374,27 +356,27 @@ with st.sidebar:
         "heatmap": st.checkbox(
             "Heatmap interpolata",
             value=True,
-            help="Superficie stimata dai sensori virtuali. Non è una misura continua reale.",
+            help="Superficie interpolata dalle misure dei sensori fisici UNISA.",
         ),
         "zones": st.checkbox(
             "Zone funzionali",
             value=True,
-            help="Poligoni sintetici che rappresentano aree operative del Digital Twin: mobilità, parcheggi, didattica, verde e servizi.",
+            help="Poligoni operativi del Digital Twin: mobilità, parcheggi, didattica, verde e servizi.",
         ),
         "reliability": st.checkbox(
             "Affidabilità spaziale",
             value=False,
-            help="Layer dimostrativo: affidabilità più alta vicino ai sensori virtuali, più bassa lontano dai punti.",
+            help="Affidabilità più alta vicino ai sensori fisici, più bassa lontano dai punti.",
         ),
         "sensors": st.checkbox(
-            "Sensori virtuali",
+            "Sensori reali",
             value=True,
-            help="Punti simulati su luoghi rilevanti del campus.",
+            help="Sensori fisici UNISA collegati al broker MQTT configurato.",
         ),
         "stations": st.checkbox(
-            "Stazioni ARPAC",
-            value=True,
-            help="Stazioni ufficiali disponibili nei dati ARPAC, quando hanno coordinate.",
+            "Riferimenti esterni",
+            value=False,
+            help="Layer opzionale per eventuali punti di riferimento esterni.",
         ),
         "buildings": st.checkbox("Edifici", value=True, help="Edifici da OpenStreetMap."),
         "roads": st.checkbox("Strade", value=True, help="Rete stradale da OpenStreetMap."),
@@ -415,7 +397,7 @@ st.markdown(
     f"""
     <div class="status-line">
     Inquinante <b>{selected_pollutant.upper()}</b> · ora <b>{selected_timestamp:%Y-%m-%d %H:%M}</b> ·
-    {len(snapshot)} sensori virtuali attivi · modello dimostrativo, non ufficiale.
+    {len(snapshot)} misure da sensori reali · stream MQTT UNISA.
     </div>
     """,
     unsafe_allow_html=True,
@@ -442,7 +424,7 @@ with tab_gis:
             if "uncertainty_score" in snapshot.columns:
                 st.metric("Incertezza media", f"{snapshot['uncertainty_score'].mean():.2f}")
         st.markdown(
-            "<p class='small-note'>La superficie continua e ottenuta con interpolazione IDW sui sensori virtuali del campus.</p>",
+            "<p class='small-note'>La superficie continua e ottenuta con interpolazione IDW sulle misure dei sensori reali del campus.</p>",
             unsafe_allow_html=True,
         )
         st.subheader("Legenda")
@@ -453,7 +435,7 @@ with tab_gis:
                 "I colori aiutano a confrontare zone del campus: non rappresentano misure ufficiali punto-per-punto."
             )
             st.write(
-                "I sensori virtuali sono i punti più importanti da leggere. "
+                "I sensori reali sono i punti più importanti da leggere. "
                 "La heatmap riempie lo spazio tra questi punti con una interpolazione semplice."
             )
             st.write(
@@ -473,9 +455,9 @@ with tab_gis:
             if layer_toggles["sensors"]:
                 map_layers.append(sensor_layer(snapshot, "estimated_value"))
             if layer_toggles["stations"]:
-                arpac_layer = station_layer(stations)
-                if arpac_layer is not None:
-                    map_layers.append(arpac_layer)
+                reference_layer = station_layer(stations)
+                if reference_layer is not None:
+                    map_layers.append(reference_layer)
             st.pydeck_chart(
                 deck(
                     map_layers,
@@ -594,7 +576,7 @@ with tab_scenario:
             50,
             int(default_traffic * 100),
             step=5,
-            help="Percentuale ipotetica di riduzione del contributo traffico nel modello.",
+            help="Percentuale ipotetica di riduzione del proxy traffico derivato dai device sniffed.",
         ) / 100
         wind_multiplier = control_b.slider(
             "Moltiplicatore vento",
@@ -602,7 +584,7 @@ with tab_scenario:
             2.0,
             float(default_wind),
             step=0.1,
-            help="Valori maggiori simulano vento più forte. Nel modello il vento disperde PM e NO2.",
+            help="Valori maggiori simulano vento più forte nello scenario what-if.",
         )
         focus_zone = control_c.selectbox(
             "Zona intervento",
@@ -734,19 +716,18 @@ with tab_scenario:
                 )
                 st.plotly_chart(fig_timeline, width="stretch")
 
-            st.subheader("Componenti del modello")
+            st.subheader("Componenti dello scenario")
             component_sensor = st.selectbox(
                 "Sensore da spiegare",
                 sorted(scenario_snapshot["sensor_name"].unique()),
-                help="Mostra quanto pesano base ARPAC, traffico, verde e meteo nel valore finale.",
+                help="Mostra valore reale misurato e componenti what-if applicate allo scenario.",
             )
             component_row = scenario_snapshot[scenario_snapshot["sensor_name"] == component_sensor].iloc[0]
             components = pd.DataFrame(
                 [
-                    {"componente": "Base ARPAC IDW", "valore": component_row["base_value"]},
+                    {"componente": "Misura reale sensore", "valore": component_row["base_value"]},
                     {"componente": "Traffico", "valore": component_row["traffic_component"]},
                     {"componente": "Verde", "valore": -component_row["green_component"]},
-                    {"componente": "Meteo", "valore": component_row["weather_component"]},
                 ]
             )
             fig_components = px.bar(
@@ -802,7 +783,7 @@ with tab_twin:
     st.markdown(
         """
         <div class="guide-box">
-        Questa vista espone gli asset del Digital Twin: zone, sensori virtuali, geometrie e affidabilità spaziale.
+        Questa vista espone gli asset del Digital Twin: zone, sensori reali, geometrie e affidabilità spaziale.
         È pensata per ragionare sul campus come sistema di entità, non solo come grafico ambientale.
         </div>
         """,
@@ -824,7 +805,7 @@ with tab_twin:
     metric_a.metric("Entità Digital Twin", f"{len(entity_df):,}")
     metric_b.metric("Zone funzionali", f"{int((entity_df['type'] == 'CampusZone').sum()) if not entity_df.empty else 0}")
     metric_c.metric(
-        "Sensori virtuali",
+        "Sensori reali",
         f"{int((entity_df['type'] == 'VirtualSensor').sum()) if not entity_df.empty else 0}",
     )
 
@@ -866,7 +847,7 @@ with tab_twin:
             width="stretch",
         )
         st.caption(
-            "Layer dimostrativo: l'affidabilità è maggiore vicino ai sensori virtuali e minore nelle aree più lontane."
+            "L'affidabilità è maggiore vicino ai sensori reali e minore nelle aree più lontane."
         )
 
     if not entity_df.empty:
@@ -910,17 +891,17 @@ with tab_guide:
     with st.expander("Cos'è un Digital Twin in questo MVP?", expanded=True):
         st.write(
             "È una rappresentazione digitale del campus che unisce dati ambientali, mappe GIS, "
-            "sensori virtuali e scenari. In questo MVP non replica tutta la fisica atmosferica: "
+            "sensori reali e scenari. Questo prototipo non replica tutta la fisica atmosferica: "
             "serve a esplorare dati, luoghi e ipotesi in modo interattivo."
         )
-    with st.expander("Cosa sono i sensori virtuali?"):
+    with st.expander("Cosa sono i sensori reali?"):
         st.write(
             "Sono punti simulati collocati in aree riconoscibili del campus, come terminal bus, parcheggio, mensa e area verde. "
             "Non sono strumenti fisici. Servono a costruire una prima griglia di osservazione locale."
         )
     with st.expander("Cosa significa heatmap?"):
         st.write(
-            "La heatmap colora una superficie continua sul campus. Viene calcolata interpolando i valori dei sensori virtuali. "
+            "La heatmap colora una superficie continua sul campus. Viene calcolata interpolando i valori dei sensori reali. "
             "Aiuta a vedere pattern spaziali, ma non è una misura diretta in ogni punto della mappa."
         )
     with st.expander("Cosa significa delta?"):
@@ -934,8 +915,8 @@ with tab_guide:
         """
         ```text
         valore stimato =
-            base ARPAC interpolata
-            + effetto traffico
+            misura reale sensore
+            + effetto traffico nello scenario
             - effetto verde
             + effetto meteo
         ```
@@ -944,12 +925,12 @@ with tab_guide:
     method_a, method_b = st.columns(2)
     with method_a:
         st.markdown("**Fonti dati**")
-        st.write("ARPAC fornisce i dati ufficiali regionali. Open-Meteo fornisce il meteo quando UNISA non espone un endpoint stabile. OpenStreetMap fornisce layer GIS.")
+        st.write("I sensori UNISA forniscono le misure ambientali. OpenStreetMap fornisce layer GIS.")
         st.markdown("**IDW**")
         st.write("L'interpolazione IDW assegna più peso ai punti vicini e meno peso a quelli lontani.")
     with method_b:
         st.markdown("**Scenario what-if**")
-        st.write("Gli slider non cambiano dati reali: modificano componenti del modello per confrontare alternative.")
+        st.write("Gli slider non cambiano le misure reali: applicano uno scenario what-if per confrontare alternative.")
         st.markdown("**Limite principale**")
         st.write("Il traffico è un proxy orario, non un conteggio reale di veicoli o persone.")
 
@@ -960,16 +941,15 @@ with tab_guide:
 with tab_quality:
     st.subheader("Qualità e provenienza dati")
     if estimates.empty:
-        st.warning("Nessun dataset stimato caricato.")
+        st.warning("Nessuna misura reale caricata.")
     else:
-        st.metric("Righe stime campus", f"{len(estimates):,}")
-        st.metric("Righe ARPAC caricate", f"{len(read_table(settings.processed_dir / 'air_quality_observations.parquet')):,}")
-        st.metric("Stazioni ARPAC", f"{len(stations):,}")
-        st.write("Ultimo download/modello:", estimates["downloaded_at"].max())
-        synthetic_share = estimates["is_synthetic"].fillna(False).mean() * 100
-        st.write(f"Quota righe basate su fallback sintetico: {synthetic_share:.1f}%")
+        st.metric("Misure reali normalizzate", f"{len(estimates):,}")
+        st.metric("Sensori fisici", f"{len(sensors):,}")
+        st.write("Ultima ingestione:", estimates["downloaded_at"].max())
+        real_share = estimates.get("is_real", pd.Series([True] * len(estimates))).fillna(False).mean() * 100
+        st.write(f"Quota righe reali: {real_share:.1f}%")
         if "confidence_label" in estimates.columns:
-            st.write("Distribuzione confidenza stime")
+            st.write("Distribuzione confidenza misure")
             st.dataframe(
                 estimates["confidence_label"]
                 .fillna("non disponibile")
@@ -979,31 +959,15 @@ with tab_quality:
                 width="stretch",
                 hide_index=True,
             )
-    st.subheader("Validazione open-data")
-    validation_rows = int(validation_summary.get("rows", 0) or 0)
-    if validation_rows:
-        overall = validation_summary.get("overall", {})
-        val_a, val_b, val_c = st.columns(3)
-        val_a.metric("Righe validazione", f"{validation_rows:,}")
-        val_b.metric("MAE medio", f"{overall.get('mae'):.2f}" if overall.get("mae") is not None else "n/d")
-        val_c.metric("Bias medio", f"{overall.get('bias'):+.2f}" if overall.get("bias") is not None else "n/d")
-        by_pollutant = pd.DataFrame(validation_summary.get("by_pollutant", []))
-        if not by_pollutant.empty:
-            st.dataframe(by_pollutant, width="stretch", hide_index=True)
-        with st.expander("Metodo di validazione"):
-            st.write(
-                "La validazione usa solo dati ARPAC open: per ogni ora e inquinante, una stazione viene esclusa, "
-                "il valore viene ricostruito dalle altre stazioni con IDW e poi confrontato con il valore osservato."
-            )
+    st.subheader("Ingestione MQTT")
+    ingestion_summary = read_json(settings.processed_dir / "realtime_ingestion_summary.json", default={})
+    if ingestion_summary:
+        st.json(ingestion_summary)
     else:
-        st.info("Validazione non disponibile: servono almeno due stazioni ARPAC con coordinate e valori nello stesso orario.")
+        st.info("Nessun riepilogo ingestione disponibile. Esegui `python3 scripts/build_datasets.py` o `python3 scripts/ingest_mqtt.py`.")
     warnings = schema_report.get("warnings", [])
     if warnings:
         st.write("Avvisi schema/provenienza")
         st.json(warnings)
     else:
         st.success("Nessun avviso schema registrato.")
-    inspection_path = settings.processed_dir / "unisa_weather_inspection.json"
-    if inspection_path.exists():
-        st.write("Ispezione pagina meteo UNISA")
-        st.json(json.loads(inspection_path.read_text(encoding="utf-8")))

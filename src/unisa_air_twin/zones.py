@@ -5,7 +5,6 @@ import json
 import pandas as pd
 
 from unisa_air_twin.config import Settings
-from unisa_air_twin.sensors import create_virtual_sensors
 from unisa_air_twin.storage import geojson_points_to_frame
 from unisa_air_twin.utils import ensure_dir, utc_now_iso
 
@@ -114,11 +113,11 @@ def create_campus_zones(settings: Settings) -> pd.DataFrame:
             "traffic_sensitivity": definition["traffic_sensitivity"],
             "green_capacity": definition["green_capacity"],
             "description": definition["description"],
-            "coordinate_quality": "synthetic",
+            "coordinate_quality": "derived",
             "source": "manual_campus_reference",
             "source_url": "https://web.unisa.it/vivere-il-campus/unisa-experience/campus-map",
             "downloaded_at": downloaded_at,
-            "is_synthetic": False,
+            "is_real": True,
         }
         rows.append(properties)
         features.append(
@@ -139,11 +138,9 @@ def create_campus_zones(settings: Settings) -> pd.DataFrame:
 
 def create_digital_twin_entities(settings: Settings) -> dict:
     zones_path = settings.processed_dir / "campus_zones.geojson"
-    sensors_path = settings.processed_dir / "campus_virtual_sensors.geojson"
+    sensors_path = settings.processed_dir / "campus_real_sensors.geojson"
     if not zones_path.exists():
         create_campus_zones(settings)
-    if not sensors_path.exists():
-        create_virtual_sensors(settings)
     zones = json.loads(zones_path.read_text(encoding="utf-8"))
     sensors = geojson_points_to_frame(sensors_path)
     entities: list[dict] = []
@@ -168,12 +165,12 @@ def create_digital_twin_entities(settings: Settings) -> dict:
         entities.append(
             {
                 "id": sensor["sensor_id"],
-                "type": "VirtualSensor",
+                "type": "RealSensor",
                 "name": sensor["name"],
                 "zone": sensor["zone"],
                 "geometry": {"type": "Point", "coordinates": [sensor["lon"], sensor["lat"]]},
                 "properties": {
-                    "coordinate_quality": sensor.get("coordinate_quality", "synthetic"),
+                    "coordinate_quality": sensor.get("coordinate_quality", "measured"),
                     "description": sensor.get("description", ""),
                 },
             }
@@ -182,7 +179,7 @@ def create_digital_twin_entities(settings: Settings) -> dict:
         "context": "UNISA Air Quality Digital Twin MVP",
         "generated_at": utc_now_iso(),
         "entities": entities,
-        "disclaimer": "MVP dimostrativo: non è un modello ufficiale sanitario o regolatorio.",
+        "disclaimer": "Misure reali da sensori UNISA: non è un servizio ufficiale sanitario o regolatorio.",
     }
     output = settings.processed_dir / "digital_twin_entities.json"
     ensure_dir(output.parent)
@@ -193,4 +190,3 @@ def create_digital_twin_entities(settings: Settings) -> dict:
 def ensure_twin_layers(settings: Settings) -> None:
     create_campus_zones(settings)
     create_digital_twin_entities(settings)
-

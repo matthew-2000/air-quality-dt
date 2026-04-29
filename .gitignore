@@ -8,9 +8,7 @@ cache/
 .DS_Store
 web/dist/
 web/node_modules/
-data/raw/arpac/*
-data/raw/weather/*
-data/raw/osm/*
+data/raw/*
 data/processed/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
