@@ -2,7 +2,7 @@
 
 This project is a first working prototype of an Urban Digital Twin for air quality around the University of Salerno, Campus di Fisciano.
 
-It downloads public data where possible, prepares geospatial and time-series datasets, creates virtual campus sensors, estimates local air quality from nearby ARPAC stations plus simple weather and mobility proxies, and exposes an interactive Streamlit dashboard.
+It downloads public data where possible, prepares geospatial and time-series datasets, creates virtual campus sensors, estimates local air quality from nearby ARPAC stations plus simple weather and mobility proxies, and exposes both the original Streamlit dashboard and a newer FastAPI + React cockpit.
 
 For non-technical users, start from [docs/USER_GUIDE.md](docs/USER_GUIDE.md).
 For the model and GIS assumptions, read [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
@@ -74,7 +74,7 @@ If your shell does not have a `python` command, use:
 python3 scripts/run_pipeline.py
 ```
 
-Start the dashboard:
+Start the original Streamlit dashboard:
 
 ```bash
 streamlit run app/streamlit_app.py
@@ -86,14 +86,31 @@ If the `streamlit` executable is not on your `PATH`, use the equivalent module f
 python3 -m streamlit run app/streamlit_app.py
 ```
 
+Start the refactored API:
+
+```bash
+python3 -m uvicorn api.main:app --reload
+```
+
+Start the React cockpit in another terminal:
+
+```bash
+npm --prefix web install
+npm --prefix web run dev
+```
+
 Useful Make commands:
 
 ```bash
 make data
 make app
+make api
+make web
 make test
 make lint
 ```
+
+The React app expects the API at `http://localhost:8000`. Set `VITE_API_BASE` before `npm --prefix web run dev` if you run the API elsewhere.
 
 ## Expected outputs
 
@@ -138,6 +155,14 @@ Sections:
 - Serie temporali: pollutant and sensor selectors.
 - Guida e metodologia: guida in linguaggio semplice, legenda, fonti dati, logica del modello e limiti.
 - Data quality: download/model metadata, row counts, station counts, schema warnings.
+
+## Refactored Web App
+
+The new app keeps the Python modeling layer under `src/unisa_air_twin/`, adds a thin HTTP layer in `api/`, and places the product UI in `web/`.
+
+- `api/main.py`: FastAPI endpoints for health, summary, timestamps, map payloads, scenario simulation, and time series.
+- `src/unisa_air_twin/ui_data.py`: shared data service used by the API and suitable for future Streamlit cleanup.
+- `web/`: React/Vite cockpit with map-first layout, scenario controls, delta view, timeline, and operational metrics.
 
 ## Model
 

@@ -1,5 +1,6 @@
 beautifulsoup4>=4.12
 duckdb>=0.10
+fastapi>=0.111
 geopandas>=0.14
 osmnx>=1.9
 pandas>=2.1
@@ -13,4 +14,5 @@ requests>=2.31
 ruff>=0.4
 shapely>=2.0
 streamlit>=1.33
+uvicorn[standard]>=0.29
 pytest>=8.0

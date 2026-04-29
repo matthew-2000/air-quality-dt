@@ -6,6 +6,8 @@ cache/
 *.egg-info/
 *.pyc
 .DS_Store
+web/dist/
+web/node_modules/
 data/raw/arpac/*
 data/raw/weather/*
 data/raw/osm/*

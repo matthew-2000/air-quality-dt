@@ -1,6 +1,6 @@
 PYTHON ?= python3
 
-.PHONY: install data app test lint
+.PHONY: install data app api web web-build test lint
 
 install:
 	$(PYTHON) -m pip install -e .
@@ -10,6 +10,15 @@ data:
 
 app:
 	$(PYTHON) -m streamlit run app/streamlit_app.py
+
+api:
+	$(PYTHON) -m uvicorn api.main:app --reload
+
+web:
+	npm --prefix web run dev
+
+web-build:
+	npm --prefix web run build
 
 test:
 	$(PYTHON) -m pytest

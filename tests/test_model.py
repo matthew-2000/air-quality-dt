@@ -3,7 +3,12 @@ from __future__ import annotations
 import pandas as pd
 
 from unisa_air_twin.config import load_settings
-from unisa_air_twin.model import estimate_campus_air_quality, estimate_spatial_uncertainty, idw_interpolation, traffic_index
+from unisa_air_twin.model import (
+    estimate_campus_air_quality,
+    estimate_spatial_uncertainty,
+    idw_interpolation,
+    traffic_index,
+)
 
 
 def test_traffic_index_by_hour_and_day() -> None:
