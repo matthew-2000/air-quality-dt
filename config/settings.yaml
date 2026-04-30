@@ -23,7 +23,7 @@ live_sensors:
     bucket_minutes: 1
     freshness_minutes: 5
   raw:
-    sensor_metadata_path: data/raw/live_sensors/sensor_catalog.json
+    sensor_metadata_path: config/sensors/sensor_PEDT.json
     mqtt_csv_path: data/raw/live_sensors/mqtt_data.csv
     mqtt_jsonl_path: data/raw/live_sensors/mqtt_raw.jsonl
 

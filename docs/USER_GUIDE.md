@@ -28,10 +28,12 @@ La sezione serie temporali mostra l'andamento di una metrica per un sensore real
 
 ## Aggiornamento Live
 
-Per raccogliere nuovi messaggi dal broker, configura prima le variabili d'ambiente private e poi avvia l'ingestione:
+Il catalogo sensori e' incluso nel repository in `config/sensors/sensor_PEDT.json`.
+
+Per raccogliere nuovi messaggi dal broker, crea `.env.local` da `.env.example`, inserisci la password MQTT e poi avvia l'ingestione:
 
 ```bash
-python3 scripts/ingest_mqtt.py --watch --duration 30 --interval 5
+make ingest-live MQTT_DURATION=30 MQTT_INTERVAL=5
 ```
 
 Poi aggiorna API/UI o usa il pulsante di refresh.

@@ -1,12 +1,32 @@
-PYTHON ?= python3
+VENV ?= .venv
+SYSTEM_PYTHON ?= python3
+PYTHON ?= $(VENV)/bin/python
+MQTT_DURATION ?= 60
+MQTT_INTERVAL ?= 5
 
-.PHONY: install data app api web web-build test lint
+.PHONY: venv install install-web bootstrap data data-live ingest-live app api web web-build test lint
 
-install:
+venv:
+	@if [ ! -x "$(PYTHON)" ]; then $(SYSTEM_PYTHON) -m venv $(VENV); fi
+	$(PYTHON) -m pip install --upgrade pip
+
+install: venv
 	$(PYTHON) -m pip install -e .
+
+install-web:
+	npm --prefix web install
+
+bootstrap: install install-web
 
 data:
 	$(PYTHON) scripts/run_pipeline.py
+
+data-live:
+	$(PYTHON) scripts/download_data.py
+	$(PYTHON) scripts/ingest_mqtt.py --duration $(MQTT_DURATION)
+
+ingest-live:
+	$(PYTHON) scripts/ingest_mqtt.py --watch --duration $(MQTT_DURATION) --interval $(MQTT_INTERVAL)
 
 app:
 	$(PYTHON) -m streamlit run app/streamlit_app.py

@@ -6,7 +6,7 @@ Il Digital Twin usa misure reali dei sensori UNISA per mostrare lo stato ambient
 
 ## Ingestione
 
-La sorgente operativa è un broker MQTT configurato tramite variabili d'ambiente. Ogni messaggio contiene un ID sensore, un timestamp e misure ambientali. La pipeline conserva anche il timestamp di ricezione del messaggio.
+La sorgente operativa è un broker MQTT configurato tramite `.env.local` o variabili d'ambiente. Ogni messaggio contiene un ID sensore, un timestamp e misure ambientali. La pipeline conserva anche il timestamp di ricezione del messaggio.
 
 Campi normalizzati:
 
@@ -19,7 +19,7 @@ Campi normalizzati:
 - `humidity`
 - `num_devices_sniffed`
 
-Le coordinate arrivano dal catalogo locale dei sensori, che contiene gli ID dei sensori fisici e la loro posizione.
+Le coordinate arrivano dal catalogo versionato `config/sensors/sensor_PEDT.json`, che contiene gli ID dei sensori fisici e la loro posizione.
 
 ## Dataset Processati
 

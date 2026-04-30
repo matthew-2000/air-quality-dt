@@ -20,7 +20,7 @@ import type { ReactNode } from "react";
 import { CircleMarker, GeoJSON, MapContainer, Polygon, Popup, ScaleControl, TileLayer, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
+const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
 type LatLon = { lat: number; lon: number };
 type GeoFeature = {
@@ -1006,11 +1006,17 @@ function App() {
           <section className="panel loading-panel" aria-live="polite">
             <div className="panel-head">
               <div>
-                <span>Caricamento</span>
-                <h2>Allineamento dashboard</h2>
+                <span>{error ? "Errore" : "Caricamento"}</span>
+                <h2>{error ? "Dashboard non disponibile" : "Allineamento dashboard"}</h2>
               </div>
             </div>
-            <p>I dati del campus sono in aggiornamento. La dashboard viene popolata non appena snapshot e mappa sono pronti.</p>
+            {error ? (
+              <p>
+                {error}. Verifica che l'API sia attiva con <code>make api</code> e che il frontend sia avviato con <code>make web</code>.
+              </p>
+            ) : (
+              <p>I dati del campus sono in aggiornamento. La dashboard viene popolata non appena snapshot e mappa sono pronti.</p>
+            )}
           </section>
         )}
       </section>

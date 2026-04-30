@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 
 import pandas as pd
 
-from unisa_air_twin.config import load_settings
+from unisa_air_twin.config import load_dotenv, load_settings
 from unisa_air_twin.live_sensors import (
     build_operational_snapshots,
     build_realtime_dataset,
@@ -48,6 +49,14 @@ def test_live_sensors_builds_real_sensor_rows(tmp_path) -> None:
     assert set(observations["pollutant"]) == {"pm1", "pm25", "pm10", "voc_index"}
     assert observations["is_real"].eq(True).all()
     assert (processed_dir / "campus_real_sensors.geojson").exists()
+
+
+def test_default_pedt_sensor_catalog_is_versioned() -> None:
+    sensors = load_sensor_catalog(load_settings())
+
+    assert len(sensors) == 19
+    assert "IT5YELKAH9XRB5" in set(sensors["sensor_id"])
+    assert sensors[["lat", "lon"]].notna().all().all()
 
 
 def test_operational_snapshots_merge_staggered_sensor_messages() -> None:
@@ -107,3 +116,57 @@ def test_operational_snapshots_merge_staggered_sensor_messages() -> None:
     assert latest_snapshot["capable_sensor_count"].eq(2).all()
     assert latest_snapshot["coverage_ratio"].eq(1.0).all()
     assert latest_snapshot.loc[latest_snapshot["sensor_id"] == "B", "reading_age_seconds"].iloc[0] > 60
+
+
+def test_load_dotenv_populates_missing_environment_variables(tmp_path, monkeypatch) -> None:
+    dotenv_path = tmp_path / ".env.local"
+    dotenv_path.write_text(
+        "UNISA_MQTT_HOST=test-broker\n"
+        "export UNISA_MQTT_PORT=1884\n"
+        "UNISA_MQTT_USERNAME='user'\n"
+        'UNISA_MQTT_PASSWORD="pass"\n'
+        'UNISA_MQTT_TOPIC="#"\n',
+        encoding="utf-8",
+    )
+
+    for key in ["UNISA_MQTT_HOST", "UNISA_MQTT_PORT", "UNISA_MQTT_USERNAME", "UNISA_MQTT_PASSWORD", "UNISA_MQTT_TOPIC"]:
+        monkeypatch.delenv(key, raising=False)
+
+    load_dotenv(dotenv_path)
+
+    assert os.environ["UNISA_MQTT_HOST"] == "test-broker"
+    assert os.environ["UNISA_MQTT_PORT"] == "1884"
+    assert os.environ["UNISA_MQTT_USERNAME"] == "user"
+    assert os.environ["UNISA_MQTT_PASSWORD"] == "pass"
+    assert os.environ["UNISA_MQTT_TOPIC"] == "#"
+
+
+def test_load_settings_allows_env_local_to_override_env_file(tmp_path, monkeypatch) -> None:
+    settings_path = tmp_path / "settings.yaml"
+    settings_path.write_text(
+        """
+project:
+  name: test
+paths:
+  raw_dir: data/raw
+  processed_dir: data/processed
+campus:
+  fallback_latitude: 40.771
+  fallback_longitude: 14.790
+live_sensors: {}
+model: {}
+""",
+        encoding="utf-8",
+    )
+    env_path = tmp_path / ".env"
+    local_path = tmp_path / ".env.local"
+    env_path.write_text("UNISA_MQTT_HOST=base-host\n", encoding="utf-8")
+    local_path.write_text("UNISA_MQTT_HOST=local-host\n", encoding="utf-8")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("UNISA_MQTT_HOST", raising=False)
+    monkeypatch.setattr("unisa_air_twin.config.project_path", lambda *parts: tmp_path.joinpath(*parts))
+
+    load_settings(settings_path)
+
+    assert os.environ["UNISA_MQTT_HOST"] == "local-host"
