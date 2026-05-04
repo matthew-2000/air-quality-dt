@@ -4,7 +4,7 @@ PYTHON ?= $(VENV)/bin/python
 MQTT_DURATION ?= 60
 MQTT_INTERVAL ?= 5
 
-.PHONY: venv install install-web bootstrap data data-live ingest-live app api web web-build test lint
+.PHONY: venv install install-web bootstrap data data-live ingest-live dev dev-live api web web-build test lint clean clean-ui
 
 venv:
 	@if [ ! -x "$(PYTHON)" ]; then $(SYSTEM_PYTHON) -m venv $(VENV); fi
@@ -28,8 +28,11 @@ data-live:
 ingest-live:
 	$(PYTHON) scripts/ingest_mqtt.py --watch --duration $(MQTT_DURATION) --interval $(MQTT_INTERVAL)
 
-app:
-	$(PYTHON) -m streamlit run app/streamlit_app.py
+dev:
+	$(PYTHON) scripts/dev_app.py
+
+dev-live:
+	$(PYTHON) scripts/dev_app.py --with-ingest --mqtt-duration $(MQTT_DURATION) --mqtt-interval $(MQTT_INTERVAL)
 
 api:
 	$(PYTHON) -m uvicorn api.main:app --reload
@@ -45,3 +48,9 @@ test:
 
 lint:
 	$(PYTHON) -m ruff check .
+
+clean:
+	rm -rf api/__pycache__ scripts/__pycache__ src/unisa_air_twin/__pycache__ tests/__pycache__ .pytest_cache .ruff_cache web/dist
+
+clean-ui:
+	rm -f web/tmp-ui-*.png

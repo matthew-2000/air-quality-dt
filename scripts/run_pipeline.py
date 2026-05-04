@@ -25,7 +25,7 @@ def main() -> None:
     print("2/3 Building observations from UNISA MQTT exports...")
     observations = build_realtime_dataset(settings)
     print(f"   Real sensor rows available: {len(observations):,}")
-    print("3/3 Pipeline complete. Run: streamlit run app/streamlit_app.py")
+    print("3/3 Pipeline complete. Start the cockpit with `make dev`.")
 
 
 if __name__ == "__main__":

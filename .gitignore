@@ -13,6 +13,8 @@ cache/
 .DS_Store
 web/dist/
 web/node_modules/
+web/tmp-ui-*.png
+.codex-qa/
 data/raw/*
 data/processed/*
 !data/raw/.gitkeep

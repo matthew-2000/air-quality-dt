@@ -1,12 +1,15 @@
 # Guida Utente
 
-Questa dashboard mostra misure reali dei sensori UNISA sul campus.
+La dashboard mostra le misure reali piu' recenti dei sensori UNISA sul campus.
 
-## Panoramica
+## Cosa vedi
 
-Usa la barra laterale per scegliere metrica e timestamp. La mappa mostra i sensori fisici disponibili e una heatmap interpolata dai valori misurati.
+- **Copertura per inquinante**: quanti sensori stanno contribuendo allo snapshot operativo.
+- **Mappa campus**: superficie interpolata, marker sensori e vista copertura.
+- **Dettaglio sensore**: ultima misura disponibile, freschezza del dato e storico recente.
+- **Stato ingestione**: quanti dati sono disponibili e se il feed live e' attivo, stale o non configurato.
 
-Metriche disponibili:
+## Inquinanti disponibili
 
 - PM1
 - PM2.5
@@ -14,30 +17,32 @@ Metriche disponibili:
 - indice VOC
 - indice NOx
 
-## Mappa
+## Interpretazione corretta
 
-I marker rappresentano sensori reali. I colori più caldi indicano valori più alti per la metrica selezionata. La heatmap aiuta a leggere la distribuzione spaziale, ma non sostituisce la misura puntuale dei sensori.
+- I marker sono misure reali dei sensori.
+- La superficie mappa e' una lettura spaziale interpolata, non una misura certificata in ogni punto del campus.
+- Il timestamp operativo rappresenta uno snapshot costruito con bucket da 1 minuto e finestra di freschezza configurata.
 
-## Scenari
+## Feed live
 
-Gli slider applicano scenari what-if sopra il dato reale selezionato. Servono per confrontare alternative operative, non per riscrivere le misure dei sensori.
+La dashboard espone chiaramente lo stato del feed:
 
-## Serie Temporali
+- `live`: il broker MQTT sta alimentando dati recenti
+- `stale`: i dati esistono, ma l'ultima ricezione non e' recente
+- `unconfigured`: mancano variabili MQTT locali
 
-La sezione serie temporali mostra l'andamento di una metrica per un sensore reale.
-
-## Aggiornamento Live
-
-Il catalogo sensori e' incluso nel repository in `config/sensors/sensor_PEDT.json`.
-
-Per raccogliere nuovi messaggi dal broker, crea `.env.local` da `.env.example`, inserisci la password MQTT e poi avvia l'ingestione:
+Per aggiornare il feed:
 
 ```bash
 make ingest-live MQTT_DURATION=30 MQTT_INTERVAL=5
 ```
 
-Poi aggiorna API/UI o usa il pulsante di refresh.
+oppure avvia tutto insieme:
+
+```bash
+make dev-live MQTT_DURATION=30 MQTT_INTERVAL=5
+```
 
 ## Limiti
 
-Il progetto mostra dati reali e scenari esplorativi. Non è un sistema ufficiale per decisioni sanitarie, legali o regolatorie.
+Il cockpit e' uno strumento operativo e di osservazione. Non e' un sistema ufficiale per decisioni sanitarie, legali o regolatorie.

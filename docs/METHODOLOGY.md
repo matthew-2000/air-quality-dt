@@ -2,54 +2,57 @@
 
 ## Obiettivo
 
-Il Digital Twin usa misure reali dei sensori UNISA per mostrare lo stato ambientale del campus e costruire mappe operative in tempo quasi reale.
+Il Digital Twin mostra lo stato ambientale del campus usando misure reali dei sensori UNISA e snapshot operativi quasi realtime.
 
-## Ingestione
+## Pipeline dati
 
-La sorgente operativa è un broker MQTT configurato tramite `.env.local` o variabili d'ambiente. Ogni messaggio contiene un ID sensore, un timestamp e misure ambientali. La pipeline conserva anche il timestamp di ricezione del messaggio.
+La pipeline attuale e' questa:
 
-Campi normalizzati:
+1. ingestione MQTT dal broker configurato via `.env` o `.env.local`
+2. normalizzazione dei messaggi in osservazioni sensore
+3. scrittura nello store operativo SQLite
+4. generazione degli artifact usati da dashboard e audit
 
-- `pm1`
-- `pm25`
-- `pm10`
-- `voc_index`
-- `nox_index`
-- `temperature`
-- `humidity`
-- `num_devices_sniffed`
+## Store operativo
 
-Le coordinate arrivano dal catalogo versionato `config/sensors/sensor_PEDT.json`, che contiene gli ID dei sensori fisici e la loro posizione.
+La sorgente primaria del cockpit e' il database SQLite:
 
-## Dataset Processati
+- `data/processed/realtime_operational.db`
 
-La build produce:
+Contiene almeno:
 
-- `campus_real_sensors.geojson` per la mappa sensori.
-- `real_sensor_metadata.parquet` per i metadata.
-- `real_sensor_observations.parquet` per le osservazioni reali normalizzate.
-- `campus_air_quality_estimates.parquet` come tabella compatibile con API e UI.
-- `realtime_ingestion_summary.json` per audit rapido dell'ultima ingestione.
+- catalogo sensori
+- messaggi raw MQTT
+- osservazioni normalizzate
+- metadata dell'ultimo export
 
-## Mappa
+I parquet e i json processati restano output secondari per compatibilita', export e ispezione.
 
-I punti sulla mappa sono sensori fisici. La heatmap è una superficie interpolata dai valori misurati dai sensori, utile per leggere pattern spaziali. Non va interpretata come misura continua certificata in ogni punto del campus.
+## Snapshot operativo
 
-## Scenari
+Lo snapshot non e' evento-per-evento puro. E' un aggregato costruito con:
 
-Gli scenari what-if non modificano il dato reale. Partono dalla misura del sensore e applicano coefficienti trasparenti per simulare riduzione traffico, vento, pioggia o miglioramento green.
+- bucket temporale di 1 minuto
+- finestra di freschezza configurata
+- ultima misura valida per sensore all'interno della finestra
 
-Il proxy traffico usa `num_devices_sniffed`, normalizzato in `traffic_index`.
+Questo approccio produce una vista stabile e leggibile per il cockpit, mantenendo il sistema vicino al realtime senza richiedere un canale push dedicato.
 
-## Qualità Dati
+## Dati mostrati
 
-Ogni riga conserva:
+Per ogni riga operativa il sistema conserva:
 
-- timestamp misurato;
-- timestamp di ricezione;
-- sensore;
-- sorgente;
-- coordinate;
-- confidence label.
+- timestamp della misura
+- timestamp di ricezione
+- sensore
+- coordinate
+- inquinante
+- valore stimato/base
+- metriche ambientali accessorie
+- indicatori di freschezza e copertura
 
-I dati sono reali, ma il sistema non è un servizio sanitario o regolatorio ufficiale.
+## Limiti
+
+- MQTT non offre da solo uno storico completo.
+- La superficie mappa e' interpolata dai sensori e va letta come supporto operativo.
+- La dashboard oggi usa polling HTTP; non usa ancora SSE o WebSocket.

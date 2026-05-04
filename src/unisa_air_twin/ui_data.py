@@ -7,95 +7,15 @@ from typing import Any
 import pandas as pd
 
 from unisa_air_twin.config import Settings, load_settings
-from unisa_air_twin.gis import (
-    available_timestamps,
-    build_interpolation_grid,
-    build_reliability_grid,
-    color_zone_geojson,
-    sensor_snapshot,
-    timestamp_window,
-    value_color,
-    window_frame,
-    zone_delta_summary,
-)
+from unisa_air_twin.gis import available_timestamps, build_interpolation_grid, build_reliability_grid, sensor_snapshot
 from unisa_air_twin.live_sensors import (
     build_operational_snapshots,
     build_realtime_dataset,
     write_real_sensor_geojson,
 )
 from unisa_air_twin.operational_store import read_metadata, read_observations, read_sensors, replace_sensors
-from unisa_air_twin.scenario import apply_scenario, scenario_summary
 from unisa_air_twin.storage import geojson_points_to_frame, read_geojson
 from unisa_air_twin.utils import read_json
-
-SCENARIO_PRESETS: dict[str, dict[str, Any]] = {
-    "Personalizzato": {
-        "traffic_reduction": 0.2,
-        "wind_multiplier": 1.0,
-        "rain_event": False,
-        "focus_zone": "all",
-        "green_improvement": 0.0,
-    },
-    "Ora di punta al terminal bus": {
-        "traffic_reduction": 0.45,
-        "wind_multiplier": 1.0,
-        "rain_event": False,
-        "focus_zone": "mobilita",
-        "green_improvement": 0.0,
-    },
-    "Parcheggio meno utilizzato": {
-        "traffic_reduction": 0.35,
-        "wind_multiplier": 1.0,
-        "rain_event": False,
-        "focus_zone": "parcheggio",
-        "green_improvement": 0.05,
-    },
-    "Giornata di pioggia": {
-        "traffic_reduction": 0.1,
-        "wind_multiplier": 1.0,
-        "rain_event": True,
-        "focus_zone": "all",
-        "green_improvement": 0.0,
-    },
-    "Vento forte": {
-        "traffic_reduction": 0.0,
-        "wind_multiplier": 1.8,
-        "rain_event": False,
-        "focus_zone": "all",
-        "green_improvement": 0.0,
-    },
-    "Campus green mobility": {
-        "traffic_reduction": 0.35,
-        "wind_multiplier": 1.1,
-        "rain_event": False,
-        "focus_zone": "all",
-        "green_improvement": 0.25,
-    },
-    "Nuova area verde nei parcheggi": {
-        "traffic_reduction": 0.15,
-        "wind_multiplier": 1.0,
-        "rain_event": False,
-        "focus_zone": "parcheggio",
-        "green_improvement": 0.4,
-    },
-}
-
-
-def format_zone(zone: str) -> str:
-    labels = {
-        "all": "tutto il campus",
-        "amministrazione": "amministrazione",
-        "didattica": "didattica",
-        "mobilita": "mobilita",
-        "parcheggio": "parcheggio",
-        "servizi": "servizi",
-        "studio": "studio",
-        "verde": "verde",
-        "campus": "campus",
-    }
-    return labels.get(zone, zone)
-
-
 def frame_records(frame: pd.DataFrame) -> list[dict[str, Any]]:
     if frame.empty:
         return []
@@ -104,16 +24,6 @@ def frame_records(frame: pd.DataFrame) -> list[dict[str, Any]]:
         output[column] = output[column].dt.strftime("%Y-%m-%dT%H:%M:%S")
     output = output.where(pd.notna(output), None)
     return output.to_dict(orient="records")
-
-
-def color_series(values: pd.Series, palette: str = "value") -> list[list[int]]:
-    if values.empty:
-        return []
-    low = float(values.min())
-    high = float(values.max())
-    return [value_color(float(value), low, high, palette=palette) for value in values]
-
-
 def sensor_status(age_seconds: Any) -> str:
     value = pd.to_numeric(age_seconds, errors="coerce")
     if pd.isna(value):
@@ -196,7 +106,6 @@ class TwinDataService:
             "stations": stations,
             "schema_report": schema_report if isinstance(schema_report, dict) else {"warnings": []},
             "layers": layers,
-            "zones_geojson": read_geojson(self.settings.processed_dir / "campus_zones.geojson"),
         }
         return self._static_loaded
 
@@ -380,69 +289,6 @@ class TwinDataService:
             "layers": data["layers"],
             "stations": frame_records(stations),
             "meta": meta,
-        }
-
-    def scenario_payload(
-        self,
-        pollutant: str,
-        timestamp: str | pd.Timestamp,
-        traffic_reduction: float = 0.2,
-        wind_multiplier: float = 1.0,
-        rain_event: bool = False,
-        focus_zone: str = "all",
-        green_improvement: float = 0.0,
-        window_label: str = "Solo ora selezionata",
-        resolution: int = 24,
-    ) -> dict[str, Any]:
-        data = self.load()
-        timestamps = [pd.Timestamp(ts) for ts in available_timestamps(data["estimates"], pollutant)]
-        selected_timestamp = pd.Timestamp(timestamp)
-        selected_window = timestamp_window(timestamps, selected_timestamp, window_label)
-        scenario_window = window_frame(data["estimates"], pollutant, selected_window)
-        baseline = self._snapshot_from_estimates(data["estimates"], pollutant, selected_timestamp)
-        scenario = apply_scenario(
-            baseline,
-            self.settings,
-            traffic_reduction=traffic_reduction,
-            wind_multiplier=wind_multiplier,
-            rain_event=rain_event,
-            focus_zone=focus_zone,
-            green_improvement=green_improvement,
-        )
-        scenario_window_result = apply_scenario(
-            scenario_window,
-            self.settings,
-            traffic_reduction=traffic_reduction,
-            wind_multiplier=wind_multiplier,
-            rain_event=rain_event,
-            focus_zone=focus_zone,
-            green_improvement=green_improvement,
-        )
-        if not scenario.empty:
-            scenario["delta_color"] = color_series(scenario["delta"], palette="delta")
-        scenario_grid = build_interpolation_grid(scenario, value_column="scenario_value", resolution=resolution)
-        delta_grid = build_interpolation_grid(
-            scenario.rename(columns={"delta": "delta_value"}),
-            value_column="delta_value",
-            resolution=resolution,
-        )
-        zone_summary = zone_delta_summary(scenario)
-        zone_delta_geojson = color_zone_geojson(data["zones_geojson"], zone_summary, "mean_delta")
-        timeline = pd.DataFrame()
-        if not scenario_window_result.empty:
-            timeline = (
-                scenario_window_result.groupby("timestamp", as_index=False)
-                .agg(baseline=("estimated_value", "mean"), scenario=("scenario_value", "mean"))
-                .sort_values("timestamp")
-            )
-        return {
-            "summary": scenario_summary(scenario),
-            "snapshot": frame_records(scenario),
-            "scenario_grid": frame_records(scenario_grid),
-            "delta_grid": frame_records(delta_grid),
-            "zone_summary": frame_records(zone_summary),
-            "zone_delta_geojson": zone_delta_geojson,
-            "timeline": frame_records(timeline),
         }
 
     def sensor_detail(self, sensor_id: str, timestamp: str | pd.Timestamp) -> dict[str, Any]:

@@ -2,25 +2,12 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
 
-from unisa_air_twin.live_sensors import export_operational_artifacts
 from unisa_air_twin.config import load_settings
+from unisa_air_twin.live_sensors import export_operational_artifacts
 from unisa_air_twin.ui_data import get_twin_service
-
-
-class ScenarioRequest(BaseModel):
-    pollutant: str
-    timestamp: str
-    traffic_reduction: float = Field(default=0.2, ge=0.0, le=0.5)
-    wind_multiplier: float = Field(default=1.0, ge=0.5, le=2.0)
-    rain_event: bool = False
-    focus_zone: str = "all"
-    green_improvement: float = Field(default=0.0, ge=0.0, le=0.5)
-    window_label: str = "Solo ora selezionata"
-    resolution: int = Field(default=24, ge=10, le=40)
 
 
 app = FastAPI(
@@ -72,11 +59,6 @@ def map_payload(
     resolution: Annotated[int, Query(ge=10, le=40)] = 24,
 ) -> dict:
     return get_twin_service().map_payload(pollutant, timestamp, resolution)
-
-
-@app.post("/api/scenario")
-def scenario(payload: Annotated[ScenarioRequest, Body()]) -> dict:
-    raise HTTPException(status_code=410, detail="Scenario simulation disabled in real-only mode.")
 
 
 @app.get("/api/timeseries")
