@@ -776,14 +776,21 @@ function App() {
   return (
     <main className="app-shell" data-testid="air-twin-cockpit" aria-busy={isLoading}>
       <aside className="left-rail">
-        <div className="brand-block">
-          <div className="brand-mark">
-            <Leaf size={18} />
+        <div className="rail-top">
+          <div className="brand-block">
+            <div className="brand-mark">
+              <Leaf size={18} />
+            </div>
+            <div>
+              <strong>UNISA</strong>
+              <span>Air Quality Digital Twin</span>
+            </div>
           </div>
-          <div>
-            <strong>UNISA</strong>
-            <span>Air Quality Digital Twin</span>
-          </div>
+
+          <button className="refresh-button" onClick={handleManualRefresh} disabled={isRefreshing || isSummaryLoading}>
+            <RefreshCcw size={16} className={isRefreshing ? "spin-icon" : ""} />
+            {isRefreshing ? "Aggiornamento" : "Aggiorna dati"}
+          </button>
         </div>
 
         <nav className="rail-nav" aria-label="Sezioni dashboard">
@@ -793,28 +800,25 @@ function App() {
           <a href="#provenance">Dati</a>
         </nav>
 
-        <div className="rail-card rail-card-overview">
-          <span>Panoramica</span>
-          <strong>Monitoraggio campus</strong>
-          <p>Copertura sensori, qualità dell'aria, dettaglio puntuale e storico operativo.</p>
-        </div>
+        <div className="rail-meta-grid">
+          <div className="rail-card rail-card-overview">
+            <span>Panoramica</span>
+            <strong>Monitoraggio campus</strong>
+            <p>Copertura sensori, qualità dell'aria, dettaglio puntuale e storico operativo.</p>
+          </div>
 
-        <div className="rail-card">
-          <span>Snapshot operativo</span>
-          <strong>{summary ? formatDateTime(timestamp) : "Caricamento..."}</strong>
-          <p>
-            {summary
-              ? `Bucket ${summary.ingestion?.snapshot_bucket_minutes ?? "n/d"} min · finestra freschezza ${
-                  summary.ingestion?.snapshot_freshness_minutes ?? "n/d"
-                } min`
-              : "Allineamento dati sensori in corso"}
-          </p>
+          <div className="rail-card rail-card-status">
+            <span>Snapshot operativo</span>
+            <strong>{summary ? formatDateTime(timestamp) : "Caricamento..."}</strong>
+            <p>
+              {summary
+                ? `Bucket ${summary.ingestion?.snapshot_bucket_minutes ?? "n/d"} min · finestra freschezza ${
+                    summary.ingestion?.snapshot_freshness_minutes ?? "n/d"
+                  } min`
+                : "Allineamento dati sensori in corso"}
+            </p>
+          </div>
         </div>
-
-        <button className="refresh-button" onClick={handleManualRefresh} disabled={isRefreshing || isSummaryLoading}>
-          <RefreshCcw size={16} className={isRefreshing ? "spin-icon" : ""} />
-          {isRefreshing ? "Aggiornamento" : "Aggiorna dati"}
-        </button>
       </aside>
 
       <section className="workspace">
