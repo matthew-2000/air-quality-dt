@@ -5,10 +5,17 @@ from typing import Annotated
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+from unisa_air_twin.api_schemas import (
+    MapPayloadResponse,
+    RefreshResponse,
+    SensorDetailResponse,
+    SummaryResponse,
+    TimeseriesResponse,
+    TimestampsResponse,
+)
 from unisa_air_twin.config import load_settings
 from unisa_air_twin.live_sensors import export_operational_artifacts
 from unisa_air_twin.ui_data import get_twin_service
-
 
 app = FastAPI(
     title="UNISA Air Quality Digital Twin API",
@@ -35,37 +42,37 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/api/summary")
-def summary() -> dict:
+@app.get("/api/summary", response_model=SummaryResponse)
+def summary() -> SummaryResponse:
     return get_twin_service().summary()
 
 
-@app.post("/api/refresh")
-def refresh() -> dict:
+@app.post("/api/refresh", response_model=RefreshResponse)
+def refresh() -> RefreshResponse:
     snapshots = export_operational_artifacts(load_settings())
     get_twin_service().refresh()
     return {"status": "refreshed", "snapshot_rows": int(len(snapshots))}
 
 
-@app.get("/api/timestamps")
-def timestamps(pollutant: str = Query(...)) -> dict[str, list[str]]:
+@app.get("/api/timestamps", response_model=TimestampsResponse)
+def timestamps(pollutant: str = Query(...)) -> TimestampsResponse:
     return {"timestamps": get_twin_service().timestamps(pollutant)}
 
 
-@app.get("/api/map")
+@app.get("/api/map", response_model=MapPayloadResponse)
 def map_payload(
     pollutant: str = Query(...),
     timestamp: str = Query(...),
     resolution: Annotated[int, Query(ge=10, le=40)] = 24,
-) -> dict:
+) -> MapPayloadResponse:
     return get_twin_service().map_payload(pollutant, timestamp, resolution)
 
 
-@app.get("/api/timeseries")
-def timeseries(pollutant: str = Query(...), sensor_name: str = Query(...)) -> dict:
+@app.get("/api/timeseries", response_model=TimeseriesResponse)
+def timeseries(pollutant: str = Query(...), sensor_name: str = Query(...)) -> TimeseriesResponse:
     return {"points": get_twin_service().timeseries(pollutant, sensor_name)}
 
 
-@app.get("/api/sensor-detail")
-def sensor_detail(sensor_id: str = Query(...), timestamp: str = Query(...)) -> dict:
+@app.get("/api/sensor-detail", response_model=SensorDetailResponse)
+def sensor_detail(sensor_id: str = Query(...), timestamp: str = Query(...)) -> SensorDetailResponse:
     return get_twin_service().sensor_detail(sensor_id, timestamp)

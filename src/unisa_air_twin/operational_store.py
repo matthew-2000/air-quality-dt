@@ -2,15 +2,14 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from threading import Lock
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 import pandas as pd
 
 from unisa_air_twin.config import Settings
 from unisa_air_twin.utils import ensure_dir, project_path
-
 
 OBSERVATION_COLUMNS = [
     "timestamp",
@@ -162,6 +161,24 @@ def ensure_schema(settings: Settings) -> None:
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS ingestion_runs (
+                    run_id TEXT PRIMARY KEY,
+                    started_at TEXT NOT NULL,
+                    finished_at TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    raw_message_rows INTEGER NOT NULL DEFAULT 0,
+                    observation_rows INTEGER NOT NULL DEFAULT 0,
+                    snapshot_rows INTEGER NOT NULL DEFAULT 0,
+                    sensor_rows INTEGER NOT NULL DEFAULT 0,
+                    details TEXT NOT NULL DEFAULT '{}'
+                );
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO store_metadata (key, value) VALUES ('schema_version', '1')
+                ON CONFLICT(key) DO NOTHING
                 """
             )
         _INITIALIZED_DATABASES.add(db_key)
@@ -294,6 +311,48 @@ def read_raw_messages(settings: Settings) -> pd.DataFrame:
         return pd.read_sql_query(
             "SELECT * FROM raw_mqtt_messages ORDER BY received_at, topic",
             connection,
+        )
+
+
+def read_raw_message_count(settings: Settings) -> int:
+    ensure_schema(settings)
+    with connect_db(settings) as connection:
+        row = connection.execute("SELECT COUNT(*) AS count FROM raw_mqtt_messages").fetchone()
+    return int(row["count"] or 0)
+
+
+def write_ingestion_run(settings: Settings, metadata: dict[str, Any], status: str = "completed") -> None:
+    ensure_schema(settings)
+    generated_at = str(metadata.get("generated_at") or "")
+    run_id = generated_at or f"run-{len(json.dumps(metadata, sort_keys=True))}"
+    details = json.dumps(metadata, ensure_ascii=False)
+    with connect_db(settings) as connection:
+        connection.execute(
+            """
+            INSERT OR REPLACE INTO ingestion_runs (
+                run_id,
+                started_at,
+                finished_at,
+                status,
+                raw_message_rows,
+                observation_rows,
+                snapshot_rows,
+                sensor_rows,
+                details
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                run_id,
+                generated_at,
+                generated_at,
+                status,
+                int(metadata.get("raw_message_rows", 0) or 0),
+                int(metadata.get("observation_rows", metadata.get("raw_rows", 0)) or 0),
+                int(metadata.get("snapshot_rows", 0) or 0),
+                int(metadata.get("sensors", 0) or 0),
+                details,
+            ],
         )
 
 

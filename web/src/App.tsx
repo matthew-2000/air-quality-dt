@@ -19,152 +19,24 @@ import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { CircleMarker, GeoJSON, MapContainer, Polygon, Popup, ScaleControl, TileLayer, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
-
-const API_BASE = import.meta.env.VITE_API_BASE ?? "";
-
-type LatLon = { lat: number; lon: number };
-type GeoFeature = {
-  geometry: { type: string; coordinates: unknown } | null;
-  properties?: Record<string, unknown> | null;
-};
-type FeatureCollection = { type?: string; features: GeoFeature[] };
-type CoverageRow = {
-  pollutant: string;
-  active_sensors: number;
-  capable_sensors: number;
-  coverage_ratio: number;
-};
-type Summary = {
-  project: string;
-  source?: string;
-  campus: { name: string; latitude: number; longitude: number };
-  pollutants: string[];
-  default_pollutant: string;
-  latest_timestamp: string | null;
-  latest_received_at?: string | null;
-  rows: number;
-  raw_rows?: number;
-  snapshot_rows?: number;
-  sensors: number;
-  active_sensors?: number;
-  capable_sensors?: number;
-  coverage_ratio?: number;
-  coverage_by_pollutant: CoverageRow[];
-  layer_counts?: Record<string, number>;
-  ingestion?: {
-    raw_rows?: number;
-    snapshot_rows?: number;
-    sensors?: number;
-    source?: string;
-    generated_at?: string;
-    snapshot_bucket_minutes?: number;
-    snapshot_freshness_minutes?: number;
-  };
-  live_feed?: {
-    status?: "live" | "stale" | "unconfigured" | "unknown";
-    configured?: boolean;
-    missing_env?: string[];
-    latest_received_at?: string | null;
-    age_minutes?: number | null;
-  };
-  warnings: unknown[];
-  mode?: string;
-};
-type SnapshotSensor = LatLon & {
-  sensor_id: string;
-  sensor_name: string;
-  estimated_value: number;
-  measured_at?: string | null;
-  received_at?: string | null;
-  reading_age_seconds?: number;
-  reading_age_minutes?: number;
-  confidence_label?: string;
-  humidity?: number | null;
-  temperature?: number | null;
-  num_devices_sniffed?: number | null;
-  status?: string;
-};
-type GridCell = {
-  polygon: [number, number][];
-  color: [number, number, number, number];
-  estimated_value?: number;
-  reliability?: number;
-};
-type MapPayload = {
-  snapshot: SnapshotSensor[];
-  grid: GridCell[];
-  reliability_grid: GridCell[];
-  zones: FeatureCollection;
-  layers: Record<string, FeatureCollection>;
-  stations: LatLon[];
-  meta?: {
-    active_sensors: number;
-    capable_sensors: number;
-    coverage_ratio: number;
-    fresh_sensors: number;
-    recent_sensors: number;
-    aging_sensors: number;
-    median_age_seconds: number;
-    min_value?: number | null;
-    max_value?: number | null;
-  };
-};
-type HistoryPoint = {
-  timestamp: string;
-  estimated_value: number;
-  temperature?: number | null;
-  humidity?: number | null;
-  num_devices_sniffed?: number | null;
-};
-type SensorMetric = {
-  pollutant: string;
-  estimated_value: number;
-  measured_at?: string | null;
-  received_at?: string | null;
-  reading_age_seconds?: number;
-  confidence_label?: string;
-  status?: string;
-  temperature?: number | null;
-  humidity?: number | null;
-  num_devices_sniffed?: number | null;
-};
-type SensorDetail = {
-  sensor: {
-    sensor_id: string;
-    name?: string;
-    lat?: number;
-    lon?: number;
-    description?: string;
-    coordinate_quality?: string;
-  };
-  timestamp: string;
-  latest_values: SensorMetric[];
-  history: Record<string, HistoryPoint[]>;
-  environment: {
-    temperature?: number | null;
-    humidity?: number | null;
-    num_devices_sniffed?: number | null;
-    received_at?: string | null;
-  };
-};
-type LayerVisibility = Record<"buildings" | "roads" | "green" | "transport" | "parking", boolean>;
-type MapView = "surface" | "sensors" | "coverage";
-
-const pollutantLabels: Record<string, string> = {
-  pm1: "PM1",
-  pm10: "PM10",
-  pm25: "PM2.5",
-  voc_index: "VOC index",
-  nox_index: "NOx index",
-};
-
-const pollutantUnits: Record<string, string> = {
-  pm1: "ug/m3",
-  pm10: "ug/m3",
-  pm25: "ug/m3",
-  voc_index: "indice",
-  nox_index: "indice",
-};
+import { getJson, requestMessage } from "./api";
+import {
+  ageLabel,
+  coverageText,
+  formatDateTime,
+  formatNumber,
+  formatPercent,
+  formatTime,
+  pathForValues,
+  pollutantLabels,
+  pollutantUnits,
+  statusLabel,
+  statusTone,
+} from "./format";
+import { CoverageBar } from "./components/CoverageBar";
+import { EmptyStatePanel } from "./components/EmptyStatePanel";
+import { SummaryCard } from "./components/SummaryCard";
+import type { FeatureCollection, HistoryPoint, LatLon, LayerVisibility, MapPayload, MapView, SensorDetail, SnapshotSensor, Summary } from "./types";
 
 const layerLabels: Array<{ id: keyof LayerVisibility; label: string; icon: ReactNode }> = [
   { id: "buildings", label: "Edifici", icon: <MapIcon size={14} /> },
@@ -182,85 +54,8 @@ const defaultLayers: LayerVisibility = {
   parking: false,
 };
 
-async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, init);
-  if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
-  }
-  return response.json();
-}
-
 function rgba(color: [number, number, number, number], alphaScale = 1) {
   return `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${(color[3] / 255) * alphaScale})`;
-}
-
-function formatTime(value: string | null | undefined) {
-  if (!value) return "n/d";
-  return new Intl.DateTimeFormat("it-IT", {
-    day: "2-digit",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
-}
-
-function formatDateTime(value: string | null | undefined) {
-  if (!value) return "n/d";
-  return new Intl.DateTimeFormat("it-IT", {
-    day: "2-digit",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(new Date(value));
-}
-
-function formatNumber(value: number | null | undefined, digits = 1) {
-  if (value === null || value === undefined || Number.isNaN(value)) return "n/d";
-  return value.toLocaleString("it-IT", {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  });
-}
-
-function formatPercent(value: number | null | undefined) {
-  if (value === null || value === undefined || Number.isNaN(value)) return "n/d";
-  return `${Math.round(value * 100)}%`;
-}
-
-function ageLabel(seconds?: number | null) {
-  if (seconds === null || seconds === undefined || Number.isNaN(seconds)) return "età n/d";
-  if (seconds < 60) return `${seconds}s fa`;
-  if (seconds < 3600) return `${Math.round(seconds / 60)} min fa`;
-  return `${(seconds / 3600).toFixed(1)} h fa`;
-}
-
-function statusLabel(status?: string) {
-  if (status === "fresh") return "fresco";
-  if (status === "recent") return "recente";
-  if (status === "aging") return "in ritardo";
-  return "n/d";
-}
-
-function statusTone(status?: string) {
-  if (status === "fresh") return "good";
-  if (status === "recent") return "neutral";
-  if (status === "aging") return "warn";
-  return "muted";
-}
-
-function coverageText(active?: number, capable?: number) {
-  if (!capable) return `${active ?? 0} sensori`;
-  return `${active ?? 0}/${capable} sensori`;
-}
-
-function reliabilityLabel(value?: number | null) {
-  if (value === null || value === undefined || Number.isNaN(value)) return "n/d";
-  return `${Math.round(value * 100)}%`;
-}
-
-function requestMessage(reason: unknown) {
-  return reason instanceof Error ? reason.message : "Richiesta non riuscita";
 }
 
 function liveFeedMessage(summary?: Summary | null) {
@@ -298,20 +93,6 @@ function collectPoints(mapData?: MapPayload): LatLon[] {
   mapData?.snapshot.forEach((sensor) => points.push(sensor));
   Object.values(mapData?.layers ?? {}).forEach((layer) => collectGeoPoints(layer).forEach((point) => points.push(point)));
   return points;
-}
-
-function pathForValues(values: number[]) {
-  if (!values.length) return "";
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const span = max - min || 1;
-  return values
-    .map((value, index) => {
-      const x = 7 + (index / Math.max(values.length - 1, 1)) * 86;
-      const y = 84 - ((value - min) / span) * 62;
-      return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
-    })
-    .join(" ");
 }
 
 function MapFitBounds({ points }: { points: LatLon[] }) {
@@ -435,52 +216,6 @@ function CampusMap({
 
 function sensorLabelsSuffix(sensor: SnapshotSensor) {
   return sensor.confidence_label ? `(${sensor.confidence_label})` : "";
-}
-
-function SummaryCard({
-  title,
-  value,
-  note,
-  icon,
-}: {
-  title: string;
-  value: string;
-  note: string;
-  icon: ReactNode;
-}) {
-  return (
-    <article className="summary-card">
-      <div>
-        <span>{title}</span>
-        <strong>{value}</strong>
-        <small>{note}</small>
-      </div>
-      <div className="summary-icon">{icon}</div>
-    </article>
-  );
-}
-
-function CoverageBar({ row, selected, onSelect }: { row: CoverageRow; selected: boolean; onSelect: () => void }) {
-  const label = pollutantLabels[row.pollutant] ?? row.pollutant.toUpperCase();
-  return (
-    <button className={selected ? "coverage-row active" : "coverage-row"} onClick={onSelect} aria-pressed={selected}>
-      <div className="coverage-copy">
-        <strong>{label}</strong>
-        <span>{coverageText(row.active_sensors, row.capable_sensors)}</span>
-      </div>
-      <div
-        className="coverage-meter"
-        role="meter"
-        aria-label={`Copertura ${label}`}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={Math.round(row.coverage_ratio * 100)}
-      >
-        <i style={{ width: `${Math.max(8, Math.round(row.coverage_ratio * 100))}%` }} />
-      </div>
-      <small>{formatPercent(row.coverage_ratio)}</small>
-    </button>
-  );
 }
 
 function MapLegend({
@@ -763,6 +498,8 @@ function App() {
   }, [pollutant, summary]);
 
   const layerCountSummary = summary?.layer_counts ?? {};
+  const observationRows = summary?.observation_rows ?? summary?.raw_rows;
+  const rawMessageRows = summary?.raw_message_rows ?? summary?.ingestion?.raw_message_rows;
   const hasObservations = Boolean(summary?.latest_timestamp && summary.pollutants.length && summary.rows > 0);
   const dashboardReady = Boolean(summary && (mapData || !hasObservations));
   const isLoading = isSummaryLoading || isMapLoading || isSensorLoading || isRefreshing;
@@ -847,43 +584,8 @@ function App() {
 
         {liveWarning ? <div className="error-banner" role="alert">{liveWarning}</div> : null}
 
-        {!hasObservations ? (
-          <section className="panel empty-state-panel" aria-live="polite">
-            <div className="panel-head">
-              <div>
-                <span>Dati non ancora disponibili</span>
-                <h2>Nessuna osservazione sensore acquisita</h2>
-              </div>
-            </div>
-            <p>
-              Il catalogo contiene {summary?.sensors ?? 0} sensori, ma lo store operativo non ha ancora letture normalizzate.
-              Avvia l'ingestione MQTT e poi aggiorna la dashboard.
-            </p>
-            <div className="dataset-grid">
-              <div>
-                <span>Sensori registrati</span>
-                <strong>{summary?.sensors ?? "n/d"}</strong>
-              </div>
-              <div>
-                <span>Osservazioni archiviate</span>
-                <strong>{formatNumber(summary?.raw_rows, 0)}</strong>
-              </div>
-              <div>
-                <span>Stato feed live</span>
-                <strong>
-                  {summary?.live_feed?.status === "unconfigured"
-                    ? "non configurato"
-                    : summary?.live_feed?.status === "stale"
-                      ? "stale"
-                      : summary?.live_feed?.status ?? "n/d"}
-                </strong>
-              </div>
-              <div>
-                <span>Comando operativo</span>
-                <strong>make data-live</strong>
-              </div>
-            </div>
-          </section>
+        {!hasObservations && summary ? (
+          <EmptyStatePanel summary={summary} observationRows={observationRows} />
         ) : (
           <>
         <section className="summary-grid">
@@ -913,7 +615,7 @@ function App() {
           />
           <SummaryCard
             title="Osservazioni disponibili"
-            value={formatNumber(summary?.raw_rows, 0)}
+            value={formatNumber(observationRows, 0)}
             note="Letture archiviate nella serie"
             icon={<Archive size={20} />}
           />
@@ -1239,7 +941,11 @@ function App() {
               </div>
               <div>
                 <span>Osservazioni archiviate</span>
-                <strong>{formatNumber(summary?.raw_rows, 0)}</strong>
+                <strong>{formatNumber(observationRows, 0)}</strong>
+              </div>
+              <div>
+                <span>Messaggi MQTT raw</span>
+                <strong>{formatNumber(rawMessageRows, 0)}</strong>
               </div>
               <div>
                 <span>Ultima generazione</span>

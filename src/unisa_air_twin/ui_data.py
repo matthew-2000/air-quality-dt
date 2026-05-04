@@ -1,21 +1,32 @@
 from __future__ import annotations
 
-from functools import lru_cache
 import os
+from functools import lru_cache
 from typing import Any
 
 import pandas as pd
 
 from unisa_air_twin.config import Settings, load_settings
-from unisa_air_twin.gis import available_timestamps, build_interpolation_grid, build_reliability_grid, sensor_snapshot
+from unisa_air_twin.gis import (
+    available_timestamps,
+    build_interpolation_grid,
+    build_reliability_grid,
+    sensor_snapshot,
+)
 from unisa_air_twin.live_sensors import (
     build_operational_snapshots,
-    build_realtime_dataset,
-    write_real_sensor_geojson,
+    load_sensor_catalog,
 )
-from unisa_air_twin.operational_store import read_metadata, read_observations, read_sensors, replace_sensors
+from unisa_air_twin.operational_store import (
+    read_metadata,
+    read_observations,
+    read_raw_message_count,
+    read_sensors,
+)
 from unisa_air_twin.storage import geojson_points_to_frame, read_geojson
 from unisa_air_twin.utils import read_json
+
+
 def frame_records(frame: pd.DataFrame) -> list[dict[str, Any]]:
     if frame.empty:
         return []
@@ -24,6 +35,8 @@ def frame_records(frame: pd.DataFrame) -> list[dict[str, Any]]:
         output[column] = output[column].dt.strftime("%Y-%m-%dT%H:%M:%S")
     output = output.where(pd.notna(output), None)
     return output.to_dict(orient="records")
+
+
 def sensor_status(age_seconds: Any) -> str:
     value = pd.to_numeric(age_seconds, errors="coerce")
     if pd.isna(value):
@@ -113,16 +126,10 @@ class TwinDataService:
         sensors = read_sensors(self.settings)
         observations = read_observations(self.settings)
 
-        if sensors.empty or observations.empty:
-            build_realtime_dataset(self.settings)
-            sensors = read_sensors(self.settings)
-            observations = read_observations(self.settings)
-
         if sensors.empty:
             sensors = geojson_points_to_frame(self.settings.processed_dir / "campus_real_sensors.geojson")
             if sensors.empty:
-                sensors = write_real_sensor_geojson(self.settings)
-            replace_sensors(self.settings, sensors)
+                sensors = load_sensor_catalog(self.settings)
 
         if "timestamp" in observations.columns:
             observations["timestamp"] = pd.to_datetime(observations["timestamp"], errors="coerce")
@@ -150,6 +157,7 @@ class TwinDataService:
             "estimates": estimates,
             "observations": observations,
             "sensors": sensors,
+            "raw_message_rows": read_raw_message_count(self.settings),
             "ingestion_summary": ingestion_summary if isinstance(ingestion_summary, dict) else {},
         }
 
@@ -183,6 +191,7 @@ class TwinDataService:
         coverage_ratio = round(float(active_sensors) / capable_sensors, 3) if capable_sensors else 0.0
         ingestion = data["ingestion_summary"]
         live_feed = live_feed_status(self.settings, latest_received)
+        sensor_health = self._sensor_health(data["sensors"], data["observations"])
         coverage_by_pollutant: list[dict[str, Any]] = []
         for pollutant in ordered:
             pollutant_snapshot = (
@@ -219,12 +228,15 @@ class TwinDataService:
             "latest_timestamp": latest_timestamp,
             "latest_received_at": latest_received,
             "rows": int(len(estimates)),
-            "raw_rows": int(ingestion.get("raw_rows", 0)),
+            "raw_rows": int(ingestion.get("observation_rows", ingestion.get("raw_rows", len(data["observations"])))),
+            "observation_rows": int(ingestion.get("observation_rows", ingestion.get("raw_rows", len(data["observations"])))),
+            "raw_message_rows": int(ingestion.get("raw_message_rows", data["raw_message_rows"])),
             "snapshot_rows": int(ingestion.get("snapshot_rows", len(estimates))),
             "sensors": int(len(sensors)),
             "active_sensors": active_sensors,
             "capable_sensors": capable_sensors,
             "coverage_ratio": coverage_ratio,
+            "sensor_health": sensor_health,
             "stations": int(len(stations)),
             "coverage_by_pollutant": coverage_by_pollutant,
             "layer_counts": layer_counts,
@@ -233,6 +245,59 @@ class TwinDataService:
             "warnings": data["schema_report"].get("warnings", []),
             "mode": "real_only",
         }
+
+    def _sensor_health(self, sensors: pd.DataFrame, observations: pd.DataFrame) -> list[dict[str, Any]]:
+        if sensors.empty:
+            return []
+        sensor_rows = sensors.copy()
+        if observations.empty or "sensor_id" not in observations.columns:
+            return [
+                {
+                    "sensor_id": row.get("sensor_id"),
+                    "sensor_name": row.get("name") or row.get("sensor_id"),
+                    "status": "silent",
+                    "latest_received_at": None,
+                    "latest_measured_at": None,
+                    "pollutants": [],
+                }
+                for row in sensor_rows.to_dict(orient="records")
+            ]
+
+        obs = observations.copy()
+        obs["timestamp"] = pd.to_datetime(obs.get("timestamp"), errors="coerce")
+        obs["received_at"] = pd.to_datetime(obs.get("received_at"), errors="coerce")
+        latest_by_sensor = (
+            obs.dropna(subset=["sensor_id"])
+            .sort_values(["received_at", "timestamp"])
+            .groupby("sensor_id", as_index=False)
+            .tail(1)
+            .set_index("sensor_id")
+        )
+        pollutants_by_sensor = obs.groupby("sensor_id")["pollutant"].apply(lambda values: sorted(set(values.dropna().astype(str))))
+        rows: list[dict[str, Any]] = []
+        for sensor in sensor_rows.to_dict(orient="records"):
+            sensor_id = str(sensor.get("sensor_id"))
+            latest = latest_by_sensor.loc[sensor_id] if sensor_id in latest_by_sensor.index else None
+            latest_received = latest.get("received_at") if latest is not None else None
+            age_seconds = None
+            if latest_received is not None and pd.notna(latest_received):
+                now = pd.Timestamp.now(tz=self.settings.project.get("timezone", "Europe/Rome")).tz_localize(None)
+                age_seconds = max((now - pd.Timestamp(latest_received)).total_seconds(), 0)
+            rows.append(
+                {
+                    "sensor_id": sensor_id,
+                    "sensor_name": sensor.get("name") or sensor_id,
+                    "status": "silent" if latest is None else sensor_status(age_seconds),
+                    "latest_received_at": pd.Timestamp(latest_received).strftime("%Y-%m-%dT%H:%M:%S")
+                    if latest_received is not None and pd.notna(latest_received)
+                    else None,
+                    "latest_measured_at": pd.Timestamp(latest.get("timestamp")).strftime("%Y-%m-%dT%H:%M:%S")
+                    if latest is not None and pd.notna(latest.get("timestamp"))
+                    else None,
+                    "pollutants": pollutants_by_sensor.get(sensor_id, []),
+                }
+            )
+        return rows
 
     def timestamps(self, pollutant: str) -> list[str]:
         return self._timestamps_from_estimates(self.load()["estimates"], pollutant)

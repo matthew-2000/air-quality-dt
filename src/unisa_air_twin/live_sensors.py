@@ -13,9 +13,11 @@ from unisa_air_twin.config import Settings
 from unisa_air_twin.operational_store import (
     append_raw_messages,
     read_observations,
+    read_raw_message_count,
     replace_observations,
     replace_sensors,
     upsert_observations,
+    write_ingestion_run,
     write_metadata,
 )
 from unisa_air_twin.storage import read_geojson, write_table
@@ -382,6 +384,7 @@ def build_operational_snapshots(settings: Settings, observations: pd.DataFrame) 
 
 def build_realtime_dataset(settings: Settings) -> pd.DataFrame:
     sensors = write_real_sensor_geojson(settings)
+    raw_message_rows = len(read_mqtt_records(settings))
     observations = normalize_mqtt_observations(settings)
     replace_sensors(settings, sensors)
     replace_observations(settings, observations)
@@ -390,6 +393,8 @@ def build_realtime_dataset(settings: Settings) -> pd.DataFrame:
     write_table(snapshot_estimates, settings.processed_dir / "campus_air_quality_estimates.parquet")
     bucket_minutes, freshness_minutes = _snapshot_settings(settings)
     metadata = {
+        "raw_message_rows": int(raw_message_rows),
+        "observation_rows": int(len(observations)),
         "raw_rows": int(len(observations)),
         "snapshot_rows": int(len(snapshot_estimates)),
         "sensors": int(len(sensors)),
@@ -405,6 +410,7 @@ def build_realtime_dataset(settings: Settings) -> pd.DataFrame:
     ensure_dir(output.parent)
     output.write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
     write_metadata(settings, "last_export", metadata)
+    write_ingestion_run(settings, metadata)
     return snapshot_estimates
 
 
@@ -420,6 +426,8 @@ def export_operational_artifacts(settings: Settings) -> pd.DataFrame:
     write_table(snapshot_estimates, settings.processed_dir / "campus_air_quality_estimates.parquet")
     bucket_minutes, freshness_minutes = _snapshot_settings(settings)
     metadata = {
+        "raw_message_rows": int(read_raw_message_count(settings)),
+        "observation_rows": int(len(observations)),
         "raw_rows": int(len(observations)),
         "snapshot_rows": int(len(snapshot_estimates)),
         "sensors": int(len(sensors)),
@@ -435,6 +443,7 @@ def export_operational_artifacts(settings: Settings) -> pd.DataFrame:
     ensure_dir(output.parent)
     output.write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
     write_metadata(settings, "last_export", metadata)
+    write_ingestion_run(settings, metadata)
     return snapshot_estimates
 
 

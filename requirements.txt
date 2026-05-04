@@ -2,6 +2,7 @@ beautifulsoup4>=4.12
 duckdb>=0.10
 fastapi>=0.111
 geopandas>=0.14
+httpx>=0.27
 osmnx>=1.9
 pandas>=2.1
 paho-mqtt>=2.0
