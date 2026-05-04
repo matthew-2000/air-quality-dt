@@ -15,7 +15,7 @@ import {
   Trees,
 } from "lucide-react";
 import * as L from "leaflet";
-import { useDeferredValue, useEffect, useMemo, useState, useTransition } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { CircleMarker, GeoJSON, MapContainer, Polygon, Popup, ScaleControl, TileLayer, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
@@ -151,6 +151,14 @@ const pollutantLabels: Record<string, string> = {
   nox_index: "NOx index",
 };
 
+const pollutantUnits: Record<string, string> = {
+  pm1: "ug/m3",
+  pm10: "ug/m3",
+  pm25: "ug/m3",
+  voc_index: "indice",
+  nox_index: "indice",
+};
+
 const layerLabels: Array<{ id: keyof LayerVisibility; label: string; icon: ReactNode }> = [
   { id: "buildings", label: "Edifici", icon: <MapIcon size={14} /> },
   { id: "roads", label: "Viabilità", icon: <MapPin size={14} /> },
@@ -244,6 +252,10 @@ function reliabilityLabel(value?: number | null) {
   return `${Math.round(value * 100)}%`;
 }
 
+function requestMessage(reason: unknown) {
+  return reason instanceof Error ? reason.message : "Richiesta non riuscita";
+}
+
 function collectGeoPoints(collection?: FeatureCollection): LatLon[] {
   const points: LatLon[] = [];
   const visit = (value: unknown) => {
@@ -272,8 +284,8 @@ function pathForValues(values: number[]) {
   const span = max - min || 1;
   return values
     .map((value, index) => {
-      const x = 4 + (index / Math.max(values.length - 1, 1)) * 92;
-      const y = 90 - ((value - min) / span) * 70;
+      const x = 7 + (index / Math.max(values.length - 1, 1)) * 86;
+      const y = 84 - ((value - min) / span) * 62;
       return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
     })
     .join(" ");
@@ -310,7 +322,7 @@ function CampusMap({
 
   return (
     <div className="map-shell">
-      <MapContainer center={center} zoom={15} scrollWheelZoom className="leaflet-map" zoomControl>
+      <MapContainer center={center} zoom={15} scrollWheelZoom={false} className="leaflet-map" zoomControl>
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -426,13 +438,21 @@ function SummaryCard({
 }
 
 function CoverageBar({ row, selected, onSelect }: { row: CoverageRow; selected: boolean; onSelect: () => void }) {
+  const label = pollutantLabels[row.pollutant] ?? row.pollutant.toUpperCase();
   return (
-    <button className={selected ? "coverage-row active" : "coverage-row"} onClick={onSelect}>
+    <button className={selected ? "coverage-row active" : "coverage-row"} onClick={onSelect} aria-pressed={selected}>
       <div className="coverage-copy">
-        <strong>{pollutantLabels[row.pollutant] ?? row.pollutant.toUpperCase()}</strong>
+        <strong>{label}</strong>
         <span>{coverageText(row.active_sensors, row.capable_sensors)}</span>
       </div>
-      <div className="coverage-meter" aria-hidden="true">
+      <div
+        className="coverage-meter"
+        role="meter"
+        aria-label={`Copertura ${label}`}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(row.coverage_ratio * 100)}
+      >
         <i style={{ width: `${Math.max(8, Math.round(row.coverage_ratio * 100))}%` }} />
       </div>
       <small>{formatPercent(row.coverage_ratio)}</small>
@@ -501,10 +521,52 @@ function TrendChart({ points, pollutant }: { points: HistoryPoint[]; pollutant: 
     return <div className="chart-empty">Storico non disponibile per {pollutantLabels[pollutant] ?? pollutant.toUpperCase()}.</div>;
   }
   const values = points.map((point) => point.estimated_value);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const latest = values.at(-1);
+  const unit = pollutantUnits[pollutant] ?? "";
+  const coordinates = values.map((value, index) => {
+    const span = max - min || 1;
+    return {
+      x: 7 + (index / Math.max(values.length - 1, 1)) * 86,
+      y: 84 - ((value - min) / span) * 62,
+      value,
+      timestamp: points[index]?.timestamp,
+    };
+  });
   return (
     <div className="chart-shell">
-      <svg viewBox="0 0 100 100" className="trend-chart" role="img" aria-label={`Storico ${pollutant}`}>
+      <div className="chart-summary">
+        <div>
+          <span>Ultimo valore</span>
+          <strong>
+            {formatNumber(latest, 2)} {unit}
+          </strong>
+        </div>
+        <div>
+          <span>Intervallo</span>
+          <strong>
+            {formatNumber(min, 2)} - {formatNumber(max, 2)}
+          </strong>
+        </div>
+      </div>
+      <svg
+        viewBox="0 0 100 100"
+        className="trend-chart"
+        role="img"
+        aria-label={`Storico ${pollutantLabels[pollutant] ?? pollutant.toUpperCase()}, minimo ${formatNumber(min, 2)}, massimo ${formatNumber(max, 2)}`}
+      >
+        <line x1="7" y1="22" x2="93" y2="22" className="chart-grid-line" />
+        <line x1="7" y1="53" x2="93" y2="53" className="chart-grid-line" />
+        <line x1="7" y1="84" x2="93" y2="84" className="chart-grid-line" />
         <path d={pathForValues(values)} className="trend-line" />
+        {coordinates.map((point, index) => (
+          <circle key={`${point.timestamp}-${index}`} cx={point.x} cy={point.y} r={index === coordinates.length - 1 ? 2.2 : 1.4} className="trend-point">
+            <title>
+              {formatTime(point.timestamp)}: {formatNumber(point.value, 2)} {unit}
+            </title>
+          </circle>
+        ))}
       </svg>
       <div className="chart-axis">
         <span>{formatTime(points[0]?.timestamp)}</span>
@@ -527,22 +589,34 @@ function App() {
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
-  const [isPending, startTransition] = useTransition();
+  const [isSummaryLoading, setSummaryLoading] = useState(true);
+  const [isMapLoading, setMapLoading] = useState(false);
+  const [isSensorLoading, setSensorLoading] = useState(false);
+  const [isRefreshing, setRefreshing] = useState(false);
+  const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
   const deferredSearch = useDeferredValue(search);
 
   useEffect(() => {
-    startTransition(() => {
-      getJson<{ status: string }>("/api/refresh", { method: "POST" })
-        .catch(() => undefined)
-        .then(() => getJson<Summary>("/api/summary"))
-        .then((payload) => {
-          setSummary(payload);
-          setPollutant((current) => current || payload.default_pollutant);
-          setTimestamp(payload.latest_timestamp);
-          setError(null);
-        })
-        .catch((reason) => setError(reason.message));
-    });
+    let cancelled = false;
+    setSummaryLoading(true);
+    getJson<Summary>("/api/summary")
+      .then((payload) => {
+        if (cancelled) return;
+        setSummary(payload);
+        setPollutant((current) => current || payload.default_pollutant);
+        setTimestamp(payload.latest_timestamp);
+        setLastLoadedAt(new Date());
+        setError(null);
+      })
+      .catch((reason) => {
+        if (!cancelled) setError(requestMessage(reason));
+      })
+      .finally(() => {
+        if (!cancelled) setSummaryLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [refreshTick]);
 
   useEffect(() => {
@@ -552,24 +626,41 @@ function App() {
 
   useEffect(() => {
     if (!pollutant) return;
+    let cancelled = false;
     getJson<{ timestamps: string[] }>(`/api/timestamps?pollutant=${encodeURIComponent(pollutant)}`)
       .then((payload) => {
+        if (cancelled) return;
         setTimestamps(payload.timestamps);
         setTimestamp((current) => (current && payload.timestamps.includes(current) ? current : payload.timestamps.at(-1) ?? null));
       })
-      .catch((reason) => setError(reason.message));
+      .catch((reason) => {
+        if (!cancelled) setError(requestMessage(reason));
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [pollutant, refreshTick]);
 
   useEffect(() => {
     if (!pollutant || !timestamp) return;
-    startTransition(() => {
-      getJson<MapPayload>(`/api/map?pollutant=${encodeURIComponent(pollutant)}&timestamp=${encodeURIComponent(timestamp)}`)
-        .then((payload) => {
-          setMapData(payload);
-          setError(null);
-        })
-        .catch((reason) => setError(reason.message));
-    });
+    let cancelled = false;
+    setMapLoading(true);
+    getJson<MapPayload>(`/api/map?pollutant=${encodeURIComponent(pollutant)}&timestamp=${encodeURIComponent(timestamp)}`)
+      .then((payload) => {
+        if (cancelled) return;
+        setMapData(payload);
+        setLastLoadedAt(new Date());
+        setError(null);
+      })
+      .catch((reason) => {
+        if (!cancelled) setError(requestMessage(reason));
+      })
+      .finally(() => {
+        if (!cancelled) setMapLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [pollutant, timestamp, refreshTick]);
 
   useEffect(() => {
@@ -585,15 +676,37 @@ function App() {
 
   useEffect(() => {
     if (!selectedSensorId || !timestamp) return;
+    let cancelled = false;
+    setSensorLoading(true);
     getJson<SensorDetail>(
       `/api/sensor-detail?sensor_id=${encodeURIComponent(selectedSensorId)}&timestamp=${encodeURIComponent(timestamp)}`,
     )
       .then((payload) => {
+        if (cancelled) return;
         setSensorDetail(payload);
         setError(null);
       })
-      .catch((reason) => setError(reason.message));
+      .catch((reason) => {
+        if (!cancelled) setError(requestMessage(reason));
+      })
+      .finally(() => {
+        if (!cancelled) setSensorLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [selectedSensorId, timestamp]);
+
+  const handleManualRefresh = () => {
+    setRefreshing(true);
+    getJson<{ status: string }>("/api/refresh", { method: "POST" })
+      .then(() => {
+        setRefreshTick((current) => current + 1);
+        setError(null);
+      })
+      .catch((reason) => setError(requestMessage(reason)))
+      .finally(() => setRefreshing(false));
+  };
 
   const activeSnapshot = mapData?.snapshot ?? [];
   const filteredSnapshot = useMemo(() => {
@@ -628,9 +741,16 @@ function App() {
 
   const layerCountSummary = summary?.layer_counts ?? {};
   const dashboardReady = Boolean(summary && mapData);
+  const isLoading = isSummaryLoading || isMapLoading || isSensorLoading || isRefreshing;
+  const loadingTitle = error ? "Dashboard non disponibile" : "Allineamento dashboard";
+  const loadingCopy = isSummaryLoading
+    ? "Lettura dello stato API e dello snapshot più recente."
+    : isMapLoading
+      ? "Costruzione della mappa e dei layer campus."
+      : "Preparazione del dettaglio sensore.";
 
   return (
-    <main className="app-shell" data-testid="air-twin-cockpit">
+    <main className="app-shell" data-testid="air-twin-cockpit" aria-busy={isLoading}>
       <aside className="left-rail">
         <div className="brand-block">
           <div className="brand-mark">
@@ -649,7 +769,7 @@ function App() {
           <a href="#provenance">Dati</a>
         </nav>
 
-        <div className="rail-card">
+        <div className="rail-card rail-card-overview">
           <span>Panoramica</span>
           <strong>Monitoraggio campus</strong>
           <p>Copertura sensori, qualità dell'aria, dettaglio puntuale e storico operativo.</p>
@@ -667,9 +787,9 @@ function App() {
           </p>
         </div>
 
-        <button className="refresh-button" onClick={() => setRefreshTick((current) => current + 1)}>
-          <RefreshCcw size={16} />
-          Aggiorna dati
+        <button className="refresh-button" onClick={handleManualRefresh} disabled={isRefreshing || isSummaryLoading}>
+          <RefreshCcw size={16} className={isRefreshing ? "spin-icon" : ""} />
+          {isRefreshing ? "Aggiornamento" : "Aggiorna dati"}
         </button>
       </aside>
 
@@ -683,11 +803,19 @@ function App() {
             <span>{summary?.source ?? "UNISA AQDT"}</span>
             <span>{summary ? formatTime(summary.latest_received_at) : "Aggiornamento..."}</span>
             <span>{summary?.campus.name ?? "Campus Fisciano"}</span>
+            {lastLoadedAt ? <span>UI {formatTime(lastLoadedAt.toISOString())}</span> : null}
           </div>
         </header>
 
         {dashboardReady ? (
           <>
+        {isLoading ? (
+          <div className="sync-banner" role="status">
+            <RefreshCcw size={15} className="spin-icon" />
+            {isRefreshing ? "Refresh forzato dei dataset in corso" : "Aggiornamento vista in corso"}
+          </div>
+        ) : null}
+
         <section className="summary-grid">
           <SummaryCard
             title="Sensori attivi"
@@ -715,7 +843,7 @@ function App() {
           />
         </section>
 
-        {error ? <div className="error-banner">{error}</div> : null}
+        {error ? <div className="error-banner" role="alert">{error}</div> : null}
 
         <section className="operations-grid">
           <article className="panel coverage-panel">
@@ -724,7 +852,7 @@ function App() {
                 <span>Monitoraggio</span>
                 <h2>Copertura per inquinante</h2>
               </div>
-              {isPending ? <small>Aggiornamento in corso</small> : null}
+              {isLoading ? <small>Aggiornamento in corso</small> : null}
             </div>
             <div className="coverage-list">
               {(summary?.coverage_by_pollutant ?? []).map((row) => (
@@ -786,14 +914,32 @@ function App() {
               </small>
             </div>
             <div className="map-toolbar">
-              <div className="view-switch" aria-label="Vista mappa">
-                <button className={mapView === "surface" ? "active" : ""} onClick={() => setMapView("surface")}>
+              <div className="view-switch" role="tablist" aria-label="Vista mappa">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={mapView === "surface"}
+                  className={mapView === "surface" ? "active" : ""}
+                  onClick={() => setMapView("surface")}
+                >
                   Superficie
                 </button>
-                <button className={mapView === "sensors" ? "active" : ""} onClick={() => setMapView("sensors")}>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={mapView === "sensors"}
+                  className={mapView === "sensors" ? "active" : ""}
+                  onClick={() => setMapView("sensors")}
+                >
                   Sensori
                 </button>
-                <button className={mapView === "coverage" ? "active" : ""} onClick={() => setMapView("coverage")}>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={mapView === "coverage"}
+                  className={mapView === "coverage" ? "active" : ""}
+                  onClick={() => setMapView("coverage")}
+                >
                   Copertura
                 </button>
               </div>
@@ -803,6 +949,8 @@ function App() {
               {layerLabels.map((layer) => (
                 <button
                   key={layer.id}
+                  type="button"
+                  aria-pressed={layerVisibility[layer.id]}
                   className={layerVisibility[layer.id] ? "layer-chip active" : "layer-chip"}
                   onClick={() => setLayerVisibility((current) => ({ ...current, [layer.id]: !current[layer.id] }))}
                 >
@@ -838,7 +986,7 @@ function App() {
                 <span>Sensore selezionato</span>
                 <h2>{sensorDetail?.sensor.name ?? selectedSensorRow?.sensor_name ?? "Seleziona un sensore"}</h2>
               </div>
-              <small>{selectedSensorId ?? "n/d"}</small>
+              <small>{isSensorLoading ? "Aggiornamento dettaglio" : selectedSensorId ?? "n/d"}</small>
             </div>
 
             <div className="sensor-meta">
@@ -927,35 +1075,58 @@ function App() {
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Cerca per nome o ID sensore"
+                aria-label="Cerca sensore"
               />
             </label>
           </div>
 
-          <div className="sensor-table">
-            <div className="sensor-table-head">
-              <span>Sensore</span>
-              <span>Stato</span>
-              <span>Valore</span>
-              <span>Età dato</span>
-              <span>Misurato</span>
-            </div>
-            {filteredSnapshot.map((sensor) => (
-              <button
-                key={sensor.sensor_id}
-                className={sensor.sensor_id === selectedSensorId ? "sensor-row active" : "sensor-row"}
-                onClick={() => setSelectedSensorId(sensor.sensor_id)}
-              >
-                <span>
-                  <strong>{sensor.sensor_name}</strong>
-                  <small>{sensor.sensor_id}</small>
-                </span>
-                <span className={`status-pill ${statusTone(sensor.status)}`}>{statusLabel(sensor.status)}</span>
-                <span>{formatNumber(sensor.estimated_value, 2)}</span>
-                <span>{ageLabel(sensor.reading_age_seconds)}</span>
-                <span>{formatTime(sensor.measured_at ?? null)}</span>
-              </button>
-            ))}
-          </div>
+          <table className="sensor-table">
+            <thead>
+              <tr>
+                <th scope="col">Sensore</th>
+                <th scope="col">Stato</th>
+                <th scope="col">Valore</th>
+                <th scope="col">Età dato</th>
+                <th scope="col">Misurato</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredSnapshot.map((sensor) => {
+                const selected = sensor.sensor_id === selectedSensorId;
+                return (
+                  <tr
+                    key={sensor.sensor_id}
+                    className={selected ? "sensor-row active" : "sensor-row"}
+                    onClick={() => setSelectedSensorId(sensor.sensor_id)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setSelectedSensorId(sensor.sensor_id);
+                      }
+                    }}
+                    tabIndex={0}
+                    aria-selected={selected}
+                  >
+                    <th scope="row">
+                      <strong>{sensor.sensor_name}</strong>
+                      <small>{sensor.sensor_id}</small>
+                    </th>
+                    <td>
+                      <span className={`status-pill ${statusTone(sensor.status)}`}>{statusLabel(sensor.status)}</span>
+                    </td>
+                    <td>{formatNumber(sensor.estimated_value, 2)}</td>
+                    <td>{ageLabel(sensor.reading_age_seconds)}</td>
+                    <td>{formatTime(sensor.measured_at ?? null)}</td>
+                  </tr>
+                );
+              })}
+              {!filteredSnapshot.length ? (
+                <tr className="sensor-empty">
+                  <td colSpan={5}>Nessun sensore corrisponde alla ricerca.</td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
         </section>
 
         <section className="provenance-grid" id="provenance">
@@ -1007,15 +1178,18 @@ function App() {
             <div className="panel-head">
               <div>
                 <span>{error ? "Errore" : "Caricamento"}</span>
-                <h2>{error ? "Dashboard non disponibile" : "Allineamento dashboard"}</h2>
+                <h2>{loadingTitle}</h2>
               </div>
+            </div>
+            <div className="loading-track" aria-hidden="true">
+              <i />
             </div>
             {error ? (
               <p>
                 {error}. Verifica che l'API sia attiva con <code>make api</code> e che il frontend sia avviato con <code>make web</code>.
               </p>
             ) : (
-              <p>I dati del campus sono in aggiornamento. La dashboard viene popolata non appena snapshot e mappa sono pronti.</p>
+              <p>{loadingCopy}</p>
             )}
           </section>
         )}
