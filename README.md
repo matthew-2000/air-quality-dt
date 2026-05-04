@@ -124,6 +124,18 @@ Per eliminare gli screenshot temporanei di QA UI:
 make clean-ui
 ```
 
+Per azzerare tutti i dati live locali:
+
+```bash
+make clean-data-live
+```
+
+Per eliminare i file dati legacy del sistema precedente:
+
+```bash
+make clean-data-legacy
+```
+
 ### Avvio separato
 
 API:

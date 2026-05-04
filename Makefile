@@ -4,7 +4,7 @@ PYTHON ?= $(VENV)/bin/python
 MQTT_DURATION ?= 60
 MQTT_INTERVAL ?= 5
 
-.PHONY: venv install install-web bootstrap data data-live ingest-live dev dev-live api web web-build test lint clean clean-ui
+.PHONY: venv install install-web bootstrap data data-live ingest-live dev dev-live api web web-build test lint clean clean-ui clean-data-live clean-data-legacy
 
 venv:
 	@if [ ! -x "$(PYTHON)" ]; then $(SYSTEM_PYTHON) -m venv $(VENV); fi
@@ -54,3 +54,20 @@ clean:
 
 clean-ui:
 	rm -f web/tmp-ui-*.png
+
+clean-data-live:
+	rm -f data/raw/live_sensors/mqtt_data.csv data/raw/live_sensors/mqtt_raw.jsonl
+	rm -f data/processed/realtime_operational.db
+	rm -f data/processed/real_sensor_observations.parquet
+	rm -f data/processed/campus_air_quality_estimates.parquet
+	rm -f data/processed/realtime_ingestion_summary.json
+
+clean-data-legacy:
+	rm -f data/raw/sensesquare/mqtt_data.csv data/raw/sensesquare/mqtt_raw.jsonl data/raw/sensesquare/sensor_PEDT.json
+	rm -f data/processed/air_quality_observations.parquet
+	rm -f data/processed/arpac_station_metadata.parquet
+	rm -f data/processed/campus_virtual_sensors.geojson
+	rm -f data/processed/model_validation.parquet
+	rm -f data/processed/model_validation_summary.json
+	rm -f data/processed/unisa_weather_inspection.json
+	rm -f data/processed/weather_hourly.parquet
