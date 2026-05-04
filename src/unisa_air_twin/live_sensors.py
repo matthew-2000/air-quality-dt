@@ -53,18 +53,24 @@ def _configured_path(settings: Settings, key: str) -> Path:
 
 
 def _local_timestamp(value: Any, settings: Settings) -> pd.Timestamp:
-    if value is not None and str(value).strip():
-        numeric = pd.to_numeric(value, errors="coerce")
-        if pd.notna(numeric):
-            ts = pd.to_datetime(float(numeric), unit="s", utc=True, errors="coerce")
-        else:
-            ts = pd.to_datetime(value, utc=True, errors="coerce")
-    else:
-        ts = pd.NaT
+    if value is None or not str(value).strip():
+        return pd.NaT
+
+    timezone = settings.project.get("timezone", "Europe/Rome")
+    numeric = pd.to_numeric(value, errors="coerce")
+    if pd.notna(numeric):
+        ts = pd.to_datetime(float(numeric), unit="s", utc=True, errors="coerce")
+        if pd.isna(ts):
+            return pd.NaT
+        return pd.Timestamp(ts).tz_convert(timezone).tz_localize(None).floor("s")
+
+    ts = pd.to_datetime(value, errors="coerce")
     if pd.isna(ts):
         return pd.NaT
-    timezone = settings.project.get("timezone", "Europe/Rome")
-    return pd.Timestamp(ts).tz_convert(timezone).tz_localize(None).floor("s")
+    timestamp = pd.Timestamp(ts)
+    if timestamp.tzinfo is not None:
+        timestamp = timestamp.tz_convert(timezone).tz_localize(None)
+    return timestamp.floor("s")
 
 
 def _zone_for_point(settings: Settings, lat: float, lon: float) -> str:

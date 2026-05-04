@@ -374,6 +374,13 @@ a:focus-visible,
   max-width: 620px;
 }
 
+.empty-state-panel p {
+  margin: 0 0 18px;
+  color: var(--muted);
+  line-height: 1.7;
+  max-width: 760px;
+}
+
 .loading-track {
   height: 8px;
   width: min(360px, 100%);

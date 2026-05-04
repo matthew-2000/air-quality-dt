@@ -10,6 +10,7 @@ from unisa_air_twin.live_sensors import (
     build_operational_snapshots,
     build_realtime_dataset,
     load_sensor_catalog,
+    _local_timestamp,
 )
 
 
@@ -170,3 +171,10 @@ model: {}
     load_settings(settings_path)
 
     assert os.environ["UNISA_MQTT_HOST"] == "local-host"
+
+
+def test_local_timestamp_keeps_naive_local_strings_in_project_timezone() -> None:
+    settings = load_settings()
+
+    assert _local_timestamp("2026-05-04T14:51:33.973783", settings) == pd.Timestamp("2026-05-04 14:51:33")
+    assert _local_timestamp(1777899092, settings) == pd.Timestamp("2026-05-04 14:51:32")

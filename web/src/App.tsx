@@ -763,7 +763,8 @@ function App() {
   }, [pollutant, summary]);
 
   const layerCountSummary = summary?.layer_counts ?? {};
-  const dashboardReady = Boolean(summary && mapData);
+  const hasObservations = Boolean(summary?.latest_timestamp && summary.pollutants.length && summary.rows > 0);
+  const dashboardReady = Boolean(summary && (mapData || !hasObservations));
   const isLoading = isSummaryLoading || isMapLoading || isSensorLoading || isRefreshing;
   const loadingTitle = error ? "Dashboard non disponibile" : "Allineamento dashboard";
   const loadingCopy = isSummaryLoading
@@ -846,6 +847,45 @@ function App() {
 
         {liveWarning ? <div className="error-banner" role="alert">{liveWarning}</div> : null}
 
+        {!hasObservations ? (
+          <section className="panel empty-state-panel" aria-live="polite">
+            <div className="panel-head">
+              <div>
+                <span>Dati non ancora disponibili</span>
+                <h2>Nessuna osservazione sensore acquisita</h2>
+              </div>
+            </div>
+            <p>
+              Il catalogo contiene {summary?.sensors ?? 0} sensori, ma lo store operativo non ha ancora letture normalizzate.
+              Avvia l'ingestione MQTT e poi aggiorna la dashboard.
+            </p>
+            <div className="dataset-grid">
+              <div>
+                <span>Sensori registrati</span>
+                <strong>{summary?.sensors ?? "n/d"}</strong>
+              </div>
+              <div>
+                <span>Osservazioni archiviate</span>
+                <strong>{formatNumber(summary?.raw_rows, 0)}</strong>
+              </div>
+              <div>
+                <span>Stato feed live</span>
+                <strong>
+                  {summary?.live_feed?.status === "unconfigured"
+                    ? "non configurato"
+                    : summary?.live_feed?.status === "stale"
+                      ? "stale"
+                      : summary?.live_feed?.status ?? "n/d"}
+                </strong>
+              </div>
+              <div>
+                <span>Comando operativo</span>
+                <strong>make data-live</strong>
+              </div>
+            </div>
+          </section>
+        ) : (
+          <>
         <section className="summary-grid">
           <SummaryCard
             title="Sensori attivi"
@@ -1220,6 +1260,8 @@ function App() {
             </div>
           </article>
         </section>
+          </>
+        )}
           </>
         ) : (
           <section className="panel loading-panel" aria-live="polite">
