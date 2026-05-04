@@ -1,0 +1,324 @@
+from __future__ import annotations
+
+import json
+import sqlite3
+from threading import Lock
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+
+from unisa_air_twin.config import Settings
+from unisa_air_twin.utils import ensure_dir, project_path
+
+
+OBSERVATION_COLUMNS = [
+    "timestamp",
+    "received_at",
+    "sensor_id",
+    "sensor_name",
+    "lat",
+    "lon",
+    "zone",
+    "pollutant",
+    "base_value",
+    "estimated_value",
+    "temperature",
+    "humidity",
+    "num_devices_sniffed",
+    "traffic_index",
+    "green_index",
+    "wind_speed_10m",
+    "precipitation",
+    "traffic_component",
+    "green_component",
+    "station_count",
+    "nearest_station_km",
+    "mean_station_distance_km",
+    "uncertainty_score",
+    "confidence_label",
+    "source",
+    "source_url",
+    "downloaded_at",
+    "is_real",
+]
+
+
+SENSOR_COLUMNS = [
+    "sensor_id",
+    "name",
+    "type",
+    "lat",
+    "lon",
+    "zone",
+    "description",
+    "coordinate_quality",
+    "source",
+    "source_url",
+    "downloaded_at",
+    "is_real",
+]
+
+
+RAW_MESSAGE_COLUMNS = ["received_at", "topic", "payload"]
+
+_SCHEMA_LOCK = Lock()
+_INITIALIZED_DATABASES: set[str] = set()
+
+
+def database_path(settings: Settings) -> Path:
+    config = settings.live_sensors.get("operational", {})
+    value = config.get("db_path")
+    if not value:
+        return settings.processed_dir / "realtime_operational.db"
+    path = Path(value)
+    return path if path.is_absolute() else project_path(path)
+
+
+def connect_db(settings: Settings) -> sqlite3.Connection:
+    path = database_path(settings)
+    ensure_dir(path.parent)
+    connection = sqlite3.connect(path, timeout=30)
+    connection.row_factory = sqlite3.Row
+    return connection
+
+
+def ensure_schema(settings: Settings) -> None:
+    db_key = str(database_path(settings))
+    if db_key in _INITIALIZED_DATABASES:
+        return
+    with _SCHEMA_LOCK:
+        if db_key in _INITIALIZED_DATABASES:
+            return
+        with connect_db(settings) as connection:
+            try:
+                connection.execute("PRAGMA journal_mode=WAL")
+            except sqlite3.OperationalError:
+                connection.execute("PRAGMA journal_mode=DELETE")
+            connection.execute("PRAGMA synchronous=NORMAL")
+            connection.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS sensors (
+                    sensor_id TEXT PRIMARY KEY,
+                    name TEXT,
+                    type TEXT,
+                    lat REAL,
+                    lon REAL,
+                    zone TEXT,
+                    description TEXT,
+                    coordinate_quality TEXT,
+                    source TEXT,
+                    source_url TEXT,
+                    downloaded_at TEXT,
+                    is_real INTEGER
+                );
+
+                CREATE TABLE IF NOT EXISTS raw_mqtt_messages (
+                    received_at TEXT NOT NULL,
+                    topic TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    PRIMARY KEY (received_at, topic, payload)
+                );
+
+                CREATE TABLE IF NOT EXISTS observations (
+                    timestamp TEXT NOT NULL,
+                    received_at TEXT NOT NULL,
+                    sensor_id TEXT NOT NULL,
+                    sensor_name TEXT,
+                    lat REAL,
+                    lon REAL,
+                    zone TEXT,
+                    pollutant TEXT NOT NULL,
+                    base_value REAL,
+                    estimated_value REAL,
+                    temperature REAL,
+                    humidity REAL,
+                    num_devices_sniffed INTEGER,
+                    traffic_index REAL,
+                    green_index REAL,
+                    wind_speed_10m REAL,
+                    precipitation REAL,
+                    traffic_component REAL,
+                    green_component REAL,
+                    station_count INTEGER,
+                    nearest_station_km REAL,
+                    mean_station_distance_km REAL,
+                    uncertainty_score REAL,
+                    confidence_label TEXT,
+                    source TEXT,
+                    source_url TEXT,
+                    downloaded_at TEXT,
+                    is_real INTEGER,
+                    PRIMARY KEY (timestamp, sensor_id, pollutant, received_at)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_observations_pollutant_timestamp
+                ON observations (pollutant, timestamp);
+
+                CREATE INDEX IF NOT EXISTS idx_observations_sensor_timestamp
+                ON observations (sensor_id, timestamp);
+
+                CREATE TABLE IF NOT EXISTS store_metadata (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
+                """
+            )
+        _INITIALIZED_DATABASES.add(db_key)
+
+
+def _normalize_frame(frame: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    if frame.empty:
+        return pd.DataFrame(columns=columns)
+    copy = frame.copy()
+    for column in columns:
+        if column not in copy.columns:
+            copy[column] = None
+    copy = copy[columns]
+    for column in copy.columns:
+        series = copy[column]
+        if pd.api.types.is_datetime64_any_dtype(series):
+            copy[column] = pd.to_datetime(series, errors="coerce").dt.strftime("%Y-%m-%dT%H:%M:%S")
+        elif series.dtype == "object":
+            copy[column] = series.map(
+                lambda value: value.strftime("%Y-%m-%dT%H:%M:%S")
+                if isinstance(value, pd.Timestamp)
+                else int(value)
+                if isinstance(value, bool)
+                else value
+            )
+    copy = copy.where(pd.notna(copy), None)
+    return copy
+
+
+def replace_sensors(settings: Settings, sensors: pd.DataFrame) -> None:
+    ensure_schema(settings)
+    frame = _normalize_frame(sensors, SENSOR_COLUMNS)
+    with connect_db(settings) as connection:
+        connection.execute("DELETE FROM sensors")
+        if not frame.empty:
+            rows = [tuple(row) for row in frame.itertuples(index=False, name=None)]
+            placeholders = ",".join(["?"] * len(SENSOR_COLUMNS))
+            connection.executemany(
+                f"INSERT INTO sensors ({','.join(SENSOR_COLUMNS)}) VALUES ({placeholders})",
+                rows,
+            )
+
+
+def replace_observations(settings: Settings, observations: pd.DataFrame) -> None:
+    ensure_schema(settings)
+    frame = _normalize_frame(observations, OBSERVATION_COLUMNS)
+    with connect_db(settings) as connection:
+        connection.execute("DELETE FROM observations")
+        if not frame.empty:
+            rows = [tuple(row) for row in frame.itertuples(index=False, name=None)]
+            placeholders = ",".join(["?"] * len(OBSERVATION_COLUMNS))
+            connection.executemany(
+                f"INSERT INTO observations ({','.join(OBSERVATION_COLUMNS)}) VALUES ({placeholders})",
+                rows,
+            )
+
+
+def upsert_observations(settings: Settings, observations: pd.DataFrame) -> int:
+    ensure_schema(settings)
+    frame = _normalize_frame(observations, OBSERVATION_COLUMNS)
+    if frame.empty:
+        return 0
+    with connect_db(settings) as connection:
+        rows = [tuple(row) for row in frame.itertuples(index=False, name=None)]
+        placeholders = ",".join(["?"] * len(OBSERVATION_COLUMNS))
+        connection.executemany(
+            f"""
+            INSERT OR REPLACE INTO observations ({','.join(OBSERVATION_COLUMNS)})
+            VALUES ({placeholders})
+            """,
+            rows,
+        )
+    return len(frame)
+
+
+def append_raw_messages(settings: Settings, rows: list[dict[str, Any]]) -> int:
+    ensure_schema(settings)
+    frame = _normalize_frame(pd.DataFrame(rows), RAW_MESSAGE_COLUMNS)
+    if frame.empty:
+        return 0
+    with connect_db(settings) as connection:
+        raw_rows = [tuple(row) for row in frame.itertuples(index=False, name=None)]
+        connection.executemany(
+            """
+            INSERT OR IGNORE INTO raw_mqtt_messages (received_at, topic, payload)
+            VALUES (?, ?, ?)
+            """,
+            raw_rows,
+        )
+    return len(frame)
+
+
+def read_sensors(settings: Settings) -> pd.DataFrame:
+    ensure_schema(settings)
+    with connect_db(settings) as connection:
+        return pd.read_sql_query("SELECT * FROM sensors ORDER BY sensor_id", connection)
+
+
+def read_observations(settings: Settings) -> pd.DataFrame:
+    ensure_schema(settings)
+    with connect_db(settings) as connection:
+        return pd.read_sql_query(
+            "SELECT * FROM observations ORDER BY timestamp, pollutant, sensor_id, received_at",
+            connection,
+        )
+
+
+def read_recent_observations(settings: Settings, since_timestamp: str | None = None) -> pd.DataFrame:
+    ensure_schema(settings)
+    with connect_db(settings) as connection:
+        if not since_timestamp:
+            return pd.read_sql_query(
+                "SELECT * FROM observations ORDER BY timestamp, pollutant, sensor_id, received_at",
+                connection,
+            )
+        return pd.read_sql_query(
+            """
+            SELECT * FROM observations
+            WHERE timestamp >= ?
+            ORDER BY timestamp, pollutant, sensor_id, received_at
+            """,
+            connection,
+            params=[since_timestamp],
+        )
+
+
+def read_raw_messages(settings: Settings) -> pd.DataFrame:
+    ensure_schema(settings)
+    with connect_db(settings) as connection:
+        return pd.read_sql_query(
+            "SELECT * FROM raw_mqtt_messages ORDER BY received_at, topic",
+            connection,
+        )
+
+
+def write_metadata(settings: Settings, key: str, value: Any) -> None:
+    ensure_schema(settings)
+    serialized = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+    with connect_db(settings) as connection:
+        connection.execute(
+            """
+            INSERT INTO store_metadata (key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            [key, serialized],
+        )
+
+
+def read_metadata(settings: Settings) -> dict[str, Any]:
+    ensure_schema(settings)
+    with connect_db(settings) as connection:
+        rows = connection.execute("SELECT key, value FROM store_metadata").fetchall()
+    output: dict[str, Any] = {}
+    for row in rows:
+        value = row["value"]
+        try:
+            output[row["key"]] = json.loads(value)
+        except json.JSONDecodeError:
+            output[row["key"]] = value
+    return output

@@ -6,6 +6,8 @@ from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from unisa_air_twin.live_sensors import export_operational_artifacts
+from unisa_air_twin.config import load_settings
 from unisa_air_twin.ui_data import get_twin_service
 
 
@@ -53,7 +55,9 @@ def summary() -> dict:
 
 @app.post("/api/refresh")
 def refresh() -> dict:
-    return get_twin_service().refresh() and {"status": "refreshed"}
+    snapshots = export_operational_artifacts(load_settings())
+    get_twin_service().refresh()
+    return {"status": "refreshed", "snapshot_rows": int(len(snapshots))}
 
 
 @app.get("/api/timestamps")

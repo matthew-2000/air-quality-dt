@@ -60,6 +60,13 @@ type Summary = {
     snapshot_bucket_minutes?: number;
     snapshot_freshness_minutes?: number;
   };
+  live_feed?: {
+    status?: "live" | "stale" | "unconfigured" | "unknown";
+    configured?: boolean;
+    missing_env?: string[];
+    latest_received_at?: string | null;
+    age_minutes?: number | null;
+  };
   warnings: unknown[];
   mode?: string;
 };
@@ -254,6 +261,22 @@ function reliabilityLabel(value?: number | null) {
 
 function requestMessage(reason: unknown) {
   return reason instanceof Error ? reason.message : "Richiesta non riuscita";
+}
+
+function liveFeedMessage(summary?: Summary | null) {
+  const feed = summary?.live_feed;
+  if (!feed) return null;
+  if (feed.status === "unconfigured") {
+    const missing = (feed.missing_env ?? []).join(", ");
+    return `Feed MQTT non configurato${missing ? `: mancano ${missing}.` : "."}`;
+  }
+  if (feed.status === "stale") {
+    const age = feed.age_minutes ?? null;
+    return age === null
+      ? "Feed MQTT fermo: l'ultima misura disponibile non è recente."
+      : `Feed MQTT fermo: ultima misura ricevuta ${age} minuti fa.`;
+  }
+  return null;
 }
 
 function collectGeoPoints(collection?: FeatureCollection): LatLon[] {
@@ -748,6 +771,7 @@ function App() {
     : isMapLoading
       ? "Costruzione della mappa e dei layer campus."
       : "Preparazione del dettaglio sensore.";
+  const liveWarning = liveFeedMessage(summary);
 
   return (
     <main className="app-shell" data-testid="air-twin-cockpit" aria-busy={isLoading}>
@@ -816,6 +840,8 @@ function App() {
           </div>
         ) : null}
 
+        {liveWarning ? <div className="error-banner" role="alert">{liveWarning}</div> : null}
+
         <section className="summary-grid">
           <SummaryCard
             title="Sensori attivi"
@@ -832,7 +858,13 @@ function App() {
           <SummaryCard
             title="Ultima ricezione"
             value={formatTime(summary?.latest_received_at)}
-            note="Tempo di arrivo più recente"
+            note={
+              summary?.live_feed?.status === "live"
+                ? "Tempo di arrivo più recente"
+                : summary?.live_feed?.status === "unconfigured"
+                  ? "Broker MQTT non configurato"
+                  : "Feed non aggiornato"
+            }
             icon={<Clock3 size={20} />}
           />
           <SummaryCard
@@ -1168,6 +1200,18 @@ function App() {
               <div>
                 <span>Ultima generazione</span>
                 <strong>{formatTime(summary?.ingestion?.generated_at ?? null)}</strong>
+              </div>
+              <div>
+                <span>Stato feed live</span>
+                <strong>
+                  {summary?.live_feed?.status === "live"
+                    ? "attivo"
+                    : summary?.live_feed?.status === "stale"
+                      ? "stale"
+                      : summary?.live_feed?.status === "unconfigured"
+                        ? "non configurato"
+                        : "n/d"}
+                </strong>
               </div>
             </div>
           </article>

@@ -10,6 +10,14 @@ from typing import Any
 import pandas as pd
 
 from unisa_air_twin.config import Settings
+from unisa_air_twin.operational_store import (
+    append_raw_messages,
+    read_observations,
+    replace_observations,
+    replace_sensors,
+    upsert_observations,
+    write_metadata,
+)
 from unisa_air_twin.storage import read_geojson, write_table
 from unisa_air_twin.utils import ensure_dir, project_path, utc_now_iso
 from unisa_air_twin.zones import create_campus_zones
@@ -175,9 +183,80 @@ def read_mqtt_records(settings: Settings) -> pd.DataFrame:
     return frame.drop_duplicates(subset=["received_at", "topic", "payload"]).reset_index(drop=True)
 
 
-def normalize_mqtt_observations(settings: Settings) -> pd.DataFrame:
+def _sensor_lookup(settings: Settings) -> dict[str, dict[str, Any]]:
     sensors = load_sensor_catalog(settings)
-    metadata = sensors.set_index("sensor_id").to_dict(orient="index") if not sensors.empty else {}
+    if sensors.empty:
+        return {}
+    replace_sensors(settings, sensors)
+    return sensors.set_index("sensor_id").to_dict(orient="index")
+
+
+def _normalize_payload_record(
+    settings: Settings,
+    payload: dict[str, Any],
+    topic: str,
+    received_at_value: Any,
+    metadata: dict[str, dict[str, Any]],
+    ingested_at: str,
+) -> list[dict[str, Any]]:
+    sensor_id = str(payload.get("ID") or topic or "").strip()
+    if not sensor_id:
+        return []
+    sensor = metadata.get(sensor_id, {})
+    received_at = _local_timestamp(received_at_value, settings)
+    measured_at = _local_timestamp(payload.get("timestamp"), settings)
+    if pd.isna(measured_at):
+        measured_at = received_at
+    if pd.isna(measured_at):
+        return []
+    lat = sensor.get("lat")
+    lon = sensor.get("lon")
+    if lat is None or lon is None:
+        return []
+
+    traffic_index = min(max(float(payload.get("num_devices_sniffed") or 0.0) / 80.0, 0.0), 1.0)
+    rows: list[dict[str, Any]] = []
+    for raw_name, pollutant in POLLUTANT_FIELDS.items():
+        value = pd.to_numeric(payload.get(raw_name), errors="coerce")
+        if pd.isna(value):
+            continue
+        rows.append(
+            {
+                "timestamp": measured_at,
+                "received_at": received_at if pd.notna(received_at) else measured_at,
+                "sensor_id": sensor_id,
+                "sensor_name": sensor.get("name", sensor_id),
+                "lat": float(lat),
+                "lon": float(lon),
+                "zone": sensor.get("zone", "campus"),
+                "pollutant": pollutant,
+                "base_value": round(float(value), 3),
+                "estimated_value": round(float(value), 3),
+                "temperature": pd.to_numeric(payload.get("temperatura"), errors="coerce"),
+                "humidity": pd.to_numeric(payload.get("umidita"), errors="coerce"),
+                "num_devices_sniffed": int(payload.get("num_devices_sniffed") or 0),
+                "traffic_index": round(float(traffic_index), 3),
+                "green_index": 0.0,
+                "wind_speed_10m": 0.0,
+                "precipitation": 0.0,
+                "traffic_component": 0.0,
+                "green_component": 0.0,
+                "station_count": 1,
+                "nearest_station_km": 0.0,
+                "mean_station_distance_km": 0.0,
+                "uncertainty_score": 0.0,
+                "confidence_label": "alta",
+                "source": SOURCE_NAME,
+                "source_url": SOURCE_URL,
+                "downloaded_at": ingested_at,
+                "is_real": True,
+            }
+        )
+    return rows
+
+
+def normalize_mqtt_observations(settings: Settings) -> pd.DataFrame:
+    metadata = _sensor_lookup(settings)
     rows: list[dict[str, Any]] = []
     ingested_at = utc_now_iso()
     for _, record in read_mqtt_records(settings).iterrows():
@@ -186,57 +265,16 @@ def normalize_mqtt_observations(settings: Settings) -> pd.DataFrame:
             payload = json.loads(payload_value) if isinstance(payload_value, str) else dict(payload_value or {})
         except (TypeError, json.JSONDecodeError):
             continue
-        sensor_id = str(payload.get("ID") or record.get("topic") or "").strip()
-        if not sensor_id:
-            continue
-        sensor = metadata.get(sensor_id, {})
-        received_at = _local_timestamp(record.get("received_at"), settings)
-        measured_at = _local_timestamp(payload.get("timestamp"), settings)
-        if pd.isna(measured_at):
-            measured_at = received_at
-        if pd.isna(measured_at):
-            continue
-        lat = sensor.get("lat")
-        lon = sensor.get("lon")
-        if lat is None or lon is None:
-            continue
-        traffic_index = min(max(float(payload.get("num_devices_sniffed") or 0.0) / 80.0, 0.0), 1.0)
-        for raw_name, pollutant in POLLUTANT_FIELDS.items():
-            value = pd.to_numeric(payload.get(raw_name), errors="coerce")
-            if pd.isna(value):
-                continue
-            rows.append(
-                {
-                    "timestamp": measured_at,
-                    "received_at": received_at if pd.notna(received_at) else measured_at,
-                    "sensor_id": sensor_id,
-                    "sensor_name": sensor.get("name", sensor_id),
-                    "lat": float(lat),
-                    "lon": float(lon),
-                    "zone": sensor.get("zone", "campus"),
-                    "pollutant": pollutant,
-                    "base_value": round(float(value), 3),
-                    "estimated_value": round(float(value), 3),
-                    "temperature": pd.to_numeric(payload.get("temperatura"), errors="coerce"),
-                    "humidity": pd.to_numeric(payload.get("umidita"), errors="coerce"),
-                    "num_devices_sniffed": int(payload.get("num_devices_sniffed") or 0),
-                    "traffic_index": round(float(traffic_index), 3),
-                    "green_index": 0.0,
-                    "wind_speed_10m": 0.0,
-                    "precipitation": 0.0,
-                    "traffic_component": 0.0,
-                    "green_component": 0.0,
-                    "station_count": 1,
-                    "nearest_station_km": 0.0,
-                    "mean_station_distance_km": 0.0,
-                    "uncertainty_score": 0.0,
-                    "confidence_label": "alta",
-                    "source": SOURCE_NAME,
-                    "source_url": SOURCE_URL,
-                    "downloaded_at": ingested_at,
-                    "is_real": True,
-                }
+        rows.extend(
+            _normalize_payload_record(
+                settings,
+                payload,
+                str(record.get("topic") or ""),
+                record.get("received_at"),
+                metadata,
+                ingested_at,
             )
+        )
     observations = pd.DataFrame(rows)
     if not observations.empty:
         observations = observations.sort_values(["timestamp", "sensor_id", "pollutant"]).reset_index(drop=True)
@@ -311,6 +349,8 @@ def build_operational_snapshots(settings: Settings, observations: pd.DataFrame) 
 def build_realtime_dataset(settings: Settings) -> pd.DataFrame:
     sensors = write_real_sensor_geojson(settings)
     observations = normalize_mqtt_observations(settings)
+    replace_sensors(settings, sensors)
+    replace_observations(settings, observations)
     snapshot_estimates = build_operational_snapshots(settings, observations)
     write_table(observations, settings.processed_dir / "real_sensor_observations.parquet")
     write_table(snapshot_estimates, settings.processed_dir / "campus_air_quality_estimates.parquet")
@@ -330,6 +370,37 @@ def build_realtime_dataset(settings: Settings) -> pd.DataFrame:
     output = settings.processed_dir / "realtime_ingestion_summary.json"
     ensure_dir(output.parent)
     output.write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
+    write_metadata(settings, "last_export", metadata)
+    return snapshot_estimates
+
+
+def export_operational_artifacts(settings: Settings) -> pd.DataFrame:
+    sensors = write_real_sensor_geojson(settings)
+    replace_sensors(settings, sensors)
+    observations = read_observations(settings)
+    if not observations.empty:
+        observations["timestamp"] = pd.to_datetime(observations["timestamp"], errors="coerce")
+        observations["received_at"] = pd.to_datetime(observations["received_at"], errors="coerce")
+    snapshot_estimates = build_operational_snapshots(settings, observations)
+    write_table(observations, settings.processed_dir / "real_sensor_observations.parquet")
+    write_table(snapshot_estimates, settings.processed_dir / "campus_air_quality_estimates.parquet")
+    bucket_minutes, freshness_minutes = _snapshot_settings(settings)
+    metadata = {
+        "raw_rows": int(len(observations)),
+        "snapshot_rows": int(len(snapshot_estimates)),
+        "sensors": int(len(sensors)),
+        "source": SOURCE_NAME,
+        "source_url": SOURCE_URL,
+        "generated_at": utc_now_iso(),
+        "pollutants": sorted(observations["pollutant"].dropna().unique()) if not observations.empty else [],
+        "snapshot_bucket_minutes": bucket_minutes,
+        "snapshot_freshness_minutes": freshness_minutes,
+        "snapshot_timestamps": int(snapshot_estimates["timestamp"].nunique()) if not snapshot_estimates.empty else 0,
+    }
+    output = settings.processed_dir / "realtime_ingestion_summary.json"
+    ensure_dir(output.parent)
+    output.write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
+    write_metadata(settings, "last_export", metadata)
     return snapshot_estimates
 
 
@@ -357,6 +428,7 @@ def collect_mqtt_messages(settings: Settings, duration_seconds: int = 60, max_me
     ensure_dir(jsonl_path.parent)
     ensure_dir(csv_path.parent)
 
+    metadata = _sensor_lookup(settings)
     count = 0
 
     def on_connect(client: mqtt.Client, userdata: Any, flags: dict[str, Any], reason_code: int, properties: Any = None) -> None:
@@ -365,10 +437,11 @@ def collect_mqtt_messages(settings: Settings, duration_seconds: int = 60, max_me
     def on_message(client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessage) -> None:
         nonlocal count
         received_at = pd.Timestamp.utcnow().tz_convert(settings.project.get("timezone", "Europe/Rome")).tz_localize(None)
+        payload_text = message.payload.decode("utf-8", errors="replace")
         row = {
             "timestamp": received_at.isoformat(),
             "topic": message.topic,
-            "payload": message.payload.decode("utf-8", errors="replace"),
+            "payload": payload_text,
         }
         with jsonl_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -378,6 +451,22 @@ def collect_mqtt_messages(settings: Settings, duration_seconds: int = 60, max_me
             if write_header:
                 writer.writeheader()
             writer.writerow(row)
+        append_raw_messages(settings, [{"received_at": row["timestamp"], "topic": row["topic"], "payload": row["payload"]}])
+        try:
+            payload = json.loads(payload_text)
+        except json.JSONDecodeError:
+            payload = None
+        if isinstance(payload, dict):
+            normalized_rows = _normalize_payload_record(
+                settings,
+                payload,
+                message.topic,
+                row["timestamp"],
+                metadata,
+                utc_now_iso(),
+            )
+            if normalized_rows:
+                upsert_observations(settings, pd.DataFrame(normalized_rows))
         count += 1
         if max_messages is not None and count >= max_messages:
             client.disconnect()

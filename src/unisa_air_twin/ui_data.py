@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import os
 from typing import Any
 
 import pandas as pd
@@ -17,9 +18,14 @@ from unisa_air_twin.gis import (
     window_frame,
     zone_delta_summary,
 )
-from unisa_air_twin.live_sensors import build_realtime_dataset, write_real_sensor_geojson
+from unisa_air_twin.live_sensors import (
+    build_operational_snapshots,
+    build_realtime_dataset,
+    write_real_sensor_geojson,
+)
+from unisa_air_twin.operational_store import read_metadata, read_observations, read_sensors, replace_sensors
 from unisa_air_twin.scenario import apply_scenario, scenario_summary
-from unisa_air_twin.storage import geojson_points_to_frame, read_geojson, read_table
+from unisa_air_twin.storage import geojson_points_to_frame, read_geojson
 from unisa_air_twin.utils import read_json
 
 SCENARIO_PRESETS: dict[str, dict[str, Any]] = {
@@ -131,44 +137,52 @@ def ordered_pollutants(values: list[str], configured: list[str]) -> list[str]:
     return ordered
 
 
+def live_feed_status(settings: Settings, latest_received: str | None) -> dict[str, Any]:
+    broker = settings.live_sensors.get("broker", {})
+    required_keys = [
+        broker.get("host_env", "UNISA_MQTT_HOST"),
+        broker.get("port_env", "UNISA_MQTT_PORT"),
+        broker.get("topic_env", "UNISA_MQTT_TOPIC"),
+        broker.get("username_env", "UNISA_MQTT_USERNAME"),
+        broker.get("password_env", "UNISA_MQTT_PASSWORD"),
+    ]
+    missing = [key for key in required_keys if not os.environ.get(key)]
+    status = "unconfigured" if missing else "unknown"
+    age_minutes: int | None = None
+    latest_value: str | None = latest_received
+
+    if latest_received:
+        latest_ts = pd.to_datetime(latest_received, errors="coerce")
+        if pd.notna(latest_ts):
+            now = pd.Timestamp.now(tz=settings.project.get("timezone", "Europe/Rome")).tz_localize(None)
+            age_minutes = int(max((now - pd.Timestamp(latest_ts)).total_seconds(), 0) // 60)
+            status = "live" if not missing and age_minutes <= 15 else "stale"
+            latest_value = pd.Timestamp(latest_ts).strftime("%Y-%m-%dT%H:%M:%S")
+
+    return {
+        "status": status,
+        "configured": not missing,
+        "missing_env": missing,
+        "latest_received_at": latest_value,
+        "age_minutes": age_minutes,
+    }
+
+
 class TwinDataService:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or load_settings()
-        self._loaded: dict[str, Any] | None = None
+        self._static_loaded: dict[str, Any] | None = None
 
     def load(self) -> dict[str, Any]:
-        if self._loaded is None:
-            self._loaded = self._load_data()
-        return self._loaded
+        return {**self._load_static_data(), **self._load_dynamic_data()}
 
     def refresh(self) -> dict[str, Any]:
-        self._loaded = self._load_data()
-        return self._loaded
+        self._static_loaded = None
+        return self.load()
 
-    def _load_data(self) -> dict[str, Any]:
-        sensors = geojson_points_to_frame(self.settings.processed_dir / "campus_real_sensors.geojson")
-        if sensors.empty:
-            sensors = write_real_sensor_geojson(self.settings)
-
-        estimates = read_table(self.settings.processed_dir / "campus_air_quality_estimates.parquet")
-        if estimates.empty:
-            estimates = build_realtime_dataset(self.settings)
-        if "timestamp" in estimates.columns:
-            estimates["timestamp"] = pd.to_datetime(estimates["timestamp"], errors="coerce")
-        if "measured_at" in estimates.columns:
-            estimates["measured_at"] = pd.to_datetime(estimates["measured_at"], errors="coerce")
-        if "received_at" in estimates.columns:
-            estimates["received_at"] = pd.to_datetime(estimates["received_at"], errors="coerce")
-
-        observations = read_table(self.settings.processed_dir / "real_sensor_observations.parquet")
-        if observations.empty:
-            build_realtime_dataset(self.settings)
-            observations = read_table(self.settings.processed_dir / "real_sensor_observations.parquet")
-        if "timestamp" in observations.columns:
-            observations["timestamp"] = pd.to_datetime(observations["timestamp"], errors="coerce")
-        if "received_at" in observations.columns:
-            observations["received_at"] = pd.to_datetime(observations["received_at"], errors="coerce")
-
+    def _load_static_data(self) -> dict[str, Any]:
+        if self._static_loaded is not None:
+            return self._static_loaded
         stations = pd.DataFrame()
         schema_report = read_json(self.settings.processed_dir / "schema_report.json", default={"warnings": []})
         layers = {
@@ -178,18 +192,55 @@ class TwinDataService:
             "transport": read_geojson(self.settings.processed_dir / "campus_transport.geojson"),
             "parking": read_geojson(self.settings.processed_dir / "campus_parking.geojson"),
         }
-        ingestion_summary = read_json(
-            self.settings.processed_dir / "realtime_ingestion_summary.json",
-            default={"rows": 0, "sensors": 0, "pollutants": []},
-        )
+        self._static_loaded = {
+            "stations": stations,
+            "schema_report": schema_report if isinstance(schema_report, dict) else {"warnings": []},
+            "layers": layers,
+            "zones_geojson": read_geojson(self.settings.processed_dir / "campus_zones.geojson"),
+        }
+        return self._static_loaded
+
+    def _load_dynamic_data(self) -> dict[str, Any]:
+        sensors = read_sensors(self.settings)
+        observations = read_observations(self.settings)
+
+        if sensors.empty or observations.empty:
+            build_realtime_dataset(self.settings)
+            sensors = read_sensors(self.settings)
+            observations = read_observations(self.settings)
+
+        if sensors.empty:
+            sensors = geojson_points_to_frame(self.settings.processed_dir / "campus_real_sensors.geojson")
+            if sensors.empty:
+                sensors = write_real_sensor_geojson(self.settings)
+            replace_sensors(self.settings, sensors)
+
+        if "timestamp" in observations.columns:
+            observations["timestamp"] = pd.to_datetime(observations["timestamp"], errors="coerce")
+        if "received_at" in observations.columns:
+            observations["received_at"] = pd.to_datetime(observations["received_at"], errors="coerce")
+        if "downloaded_at" in observations.columns:
+            observations["downloaded_at"] = pd.to_datetime(observations["downloaded_at"], errors="coerce")
+
+        estimates = build_operational_snapshots(self.settings, observations)
+        if "timestamp" in estimates.columns:
+            estimates["timestamp"] = pd.to_datetime(estimates["timestamp"], errors="coerce")
+        if "measured_at" in estimates.columns:
+            estimates["measured_at"] = pd.to_datetime(estimates["measured_at"], errors="coerce")
+        if "received_at" in estimates.columns:
+            estimates["received_at"] = pd.to_datetime(estimates["received_at"], errors="coerce")
+
+        ingestion_summary = read_metadata(self.settings).get("last_export")
+        if not isinstance(ingestion_summary, dict):
+            ingestion_summary = read_json(
+                self.settings.processed_dir / "realtime_ingestion_summary.json",
+                default={"rows": 0, "sensors": 0, "pollutants": []},
+            )
 
         return {
             "estimates": estimates,
             "observations": observations,
             "sensors": sensors,
-            "stations": stations,
-            "schema_report": schema_report if isinstance(schema_report, dict) else {"warnings": []},
-            "layers": layers,
             "ingestion_summary": ingestion_summary if isinstance(ingestion_summary, dict) else {},
         }
 
@@ -201,9 +252,13 @@ class TwinDataService:
         configured_order = self.settings.model.get("pollutants", [])
         ordered = ordered_pollutants(pollutants, configured_order)
         default_pollutant = ordered[0] if ordered else "pm10"
-        timestamps = self.timestamps(default_pollutant)
+        timestamps = self._timestamps_from_estimates(estimates, default_pollutant)
         latest_timestamp = timestamps[-1] if timestamps else None
-        latest_snapshot = self.snapshot(default_pollutant, latest_timestamp) if latest_timestamp else pd.DataFrame()
+        latest_snapshot = (
+            self._snapshot_from_estimates(estimates, default_pollutant, latest_timestamp)
+            if latest_timestamp
+            else pd.DataFrame()
+        )
         sensors = data["sensors"]
         latest_received = (
             pd.to_datetime(estimates["received_at"], errors="coerce").max().strftime("%Y-%m-%dT%H:%M:%S")
@@ -218,9 +273,14 @@ class TwinDataService:
         )
         coverage_ratio = round(float(active_sensors) / capable_sensors, 3) if capable_sensors else 0.0
         ingestion = data["ingestion_summary"]
+        live_feed = live_feed_status(self.settings, latest_received)
         coverage_by_pollutant: list[dict[str, Any]] = []
         for pollutant in ordered:
-            pollutant_snapshot = self.snapshot(pollutant, latest_timestamp) if latest_timestamp else pd.DataFrame()
+            pollutant_snapshot = (
+                self._snapshot_from_estimates(estimates, pollutant, latest_timestamp)
+                if latest_timestamp
+                else pd.DataFrame()
+            )
             pollutant_active = int(pollutant_snapshot["sensor_id"].nunique()) if "sensor_id" in pollutant_snapshot.columns else 0
             pollutant_capable = (
                 int(pd.to_numeric(pollutant_snapshot["capable_sensor_count"], errors="coerce").max())
@@ -260,20 +320,31 @@ class TwinDataService:
             "coverage_by_pollutant": coverage_by_pollutant,
             "layer_counts": layer_counts,
             "ingestion": ingestion,
+            "live_feed": live_feed,
             "warnings": data["schema_report"].get("warnings", []),
             "mode": "real_only",
         }
 
     def timestamps(self, pollutant: str) -> list[str]:
-        estimates = self.load()["estimates"]
-        return [pd.Timestamp(ts).strftime("%Y-%m-%dT%H:%M:%S") for ts in available_timestamps(estimates, pollutant)]
+        return self._timestamps_from_estimates(self.load()["estimates"], pollutant)
 
     def snapshot(self, pollutant: str, timestamp: str | pd.Timestamp) -> pd.DataFrame:
-        return sensor_snapshot(self.load()["estimates"], pollutant, pd.Timestamp(timestamp))
+        return self._snapshot_from_estimates(self.load()["estimates"], pollutant, timestamp)
+
+    def _timestamps_from_estimates(self, estimates: pd.DataFrame, pollutant: str) -> list[str]:
+        return [pd.Timestamp(ts).strftime("%Y-%m-%dT%H:%M:%S") for ts in available_timestamps(estimates, pollutant)]
+
+    def _snapshot_from_estimates(
+        self,
+        estimates: pd.DataFrame,
+        pollutant: str,
+        timestamp: str | pd.Timestamp,
+    ) -> pd.DataFrame:
+        return sensor_snapshot(estimates, pollutant, pd.Timestamp(timestamp))
 
     def map_payload(self, pollutant: str, timestamp: str | pd.Timestamp, resolution: int = 24) -> dict[str, Any]:
         data = self.load()
-        snapshot = self.snapshot(pollutant, timestamp).copy()
+        snapshot = self._snapshot_from_estimates(data["estimates"], pollutant, timestamp).copy()
         if not snapshot.empty:
             snapshot["status"] = snapshot["reading_age_seconds"].map(sensor_status)
             snapshot["reading_age_minutes"] = (pd.to_numeric(snapshot["reading_age_seconds"], errors="coerce") / 60.0).round(1)
@@ -328,7 +399,7 @@ class TwinDataService:
         selected_timestamp = pd.Timestamp(timestamp)
         selected_window = timestamp_window(timestamps, selected_timestamp, window_label)
         scenario_window = window_frame(data["estimates"], pollutant, selected_window)
-        baseline = self.snapshot(pollutant, selected_timestamp)
+        baseline = self._snapshot_from_estimates(data["estimates"], pollutant, selected_timestamp)
         scenario = apply_scenario(
             baseline,
             self.settings,
@@ -398,8 +469,10 @@ class TwinDataService:
             subset = raw_history[raw_history["pollutant"] == pollutant].sort_values("timestamp")
             history_payload[pollutant] = frame_records(subset.tail(18))
 
-        latest_environment = raw_history.sort_values("timestamp").tail(1)
-        latest_environment_row = latest_environment.iloc[0].to_dict() if not latest_environment.empty else {}
+        selected_environment = raw_history[raw_history["timestamp"] == selected_timestamp].sort_values("received_at").tail(1)
+        if selected_environment.empty:
+            selected_environment = raw_history.sort_values("timestamp").tail(1)
+        latest_environment_row = selected_environment.iloc[0].to_dict() if not selected_environment.empty else {}
 
         return {
             "sensor": sensor_meta,
