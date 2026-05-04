@@ -46,6 +46,16 @@ class FakeTwinService:
     def timestamps(self, pollutant: str) -> list[str]:
         return []
 
+    def analytics(self, pollutant: str, timestamp: str | None = None) -> dict:
+        return {
+            "pollutant": pollutant,
+            "timestamp": timestamp,
+            "quality": {"rows": 0, "ok_rows": 0, "watch_rows": 0, "critical_rows": 0, "ok_ratio": 0.0, "flags": []},
+            "zone_summary": [],
+            "zone_geojson": {"type": "FeatureCollection", "features": []},
+            "trend": [],
+        }
+
 
 def test_summary_contract_exposes_raw_and_observation_counts(monkeypatch) -> None:
     monkeypatch.setattr(api_main, "get_twin_service", lambda: FakeTwinService())
@@ -68,3 +78,13 @@ def test_timestamps_contract(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json() == {"timestamps": []}
+
+
+def test_analytics_contract(monkeypatch) -> None:
+    monkeypatch.setattr(api_main, "get_twin_service", lambda: FakeTwinService())
+    client = TestClient(api_main.app)
+
+    response = client.get("/api/analytics?pollutant=pm10")
+
+    assert response.status_code == 200
+    assert response.json()["quality"]["rows"] == 0

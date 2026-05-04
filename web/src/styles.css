@@ -1011,6 +1011,63 @@ input {
   border: 1px solid rgba(67, 84, 69, 0.08);
 }
 
+.analytics-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.9fr) minmax(260px, 1fr) minmax(280px, 1.1fr);
+  gap: 18px;
+}
+
+.analytics-panel {
+  align-content: start;
+}
+
+.analytics-kpis {
+  margin-bottom: 16px;
+}
+
+.quality-flag-list,
+.zone-list {
+  display: grid;
+  gap: 10px;
+}
+
+.quality-flag-list > div,
+.zone-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(255, 251, 245, 0.9);
+  border: 1px solid rgba(67, 84, 69, 0.08);
+}
+
+.quality-flag-list span,
+.zone-row span {
+  color: var(--muted);
+}
+
+.zone-row {
+  align-items: start;
+}
+
+.zone-row > div {
+  display: grid;
+  gap: 7px;
+}
+
+.zone-row span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.88rem;
+}
+
+.chart-shell.compact .trend-chart {
+  height: 160px;
+}
+
 @media (max-width: 1240px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -1030,6 +1087,7 @@ input {
   .operations-grid,
   .detail-grid,
   .provenance-grid,
+  .analytics-grid,
   .summary-grid {
     grid-template-columns: 1fr;
   }

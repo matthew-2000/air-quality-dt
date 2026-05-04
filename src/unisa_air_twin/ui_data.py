@@ -6,7 +6,14 @@ from typing import Any
 
 import pandas as pd
 
+from unisa_air_twin.analytics import (
+    analytics_payload,
+    attach_zones,
+    colored_zone_geojson,
+    zone_summary,
+)
 from unisa_air_twin.config import Settings, load_settings
+from unisa_air_twin.data_quality import annotate_quality
 from unisa_air_twin.gis import (
     available_timestamps,
     build_interpolation_grid,
@@ -114,6 +121,7 @@ class TwinDataService:
             "green": read_geojson(self.settings.processed_dir / "campus_green.geojson"),
             "transport": read_geojson(self.settings.processed_dir / "campus_transport.geojson"),
             "parking": read_geojson(self.settings.processed_dir / "campus_parking.geojson"),
+            "zones": read_geojson(self.settings.processed_dir / "campus_zones.geojson"),
         }
         self._static_loaded = {
             "stations": stations,
@@ -137,6 +145,8 @@ class TwinDataService:
             observations["received_at"] = pd.to_datetime(observations["received_at"], errors="coerce")
         if "downloaded_at" in observations.columns:
             observations["downloaded_at"] = pd.to_datetime(observations["downloaded_at"], errors="coerce")
+        observations = attach_zones(observations, self._load_static_data()["layers"]["zones"])
+        observations = annotate_quality(observations)
 
         estimates = build_operational_snapshots(self.settings, observations)
         if "timestamp" in estimates.columns:
@@ -145,6 +155,8 @@ class TwinDataService:
             estimates["measured_at"] = pd.to_datetime(estimates["measured_at"], errors="coerce")
         if "received_at" in estimates.columns:
             estimates["received_at"] = pd.to_datetime(estimates["received_at"], errors="coerce")
+        estimates = attach_zones(estimates, self._load_static_data()["layers"]["zones"])
+        estimates = annotate_quality(estimates)
 
         ingestion_summary = read_metadata(self.settings).get("last_export")
         if not isinstance(ingestion_summary, dict):
@@ -324,6 +336,8 @@ class TwinDataService:
             snapshot["reading_age_minutes"] = (pd.to_numeric(snapshot["reading_age_seconds"], errors="coerce") / 60.0).round(1)
         grid = build_interpolation_grid(snapshot, resolution=resolution)
         reliability_grid = build_reliability_grid(snapshot, resolution=resolution)
+        zones = zone_summary(snapshot, data["layers"]["zones"])
+        colored_zones = colored_zone_geojson(data["layers"]["zones"], zones)
         ages = pd.to_numeric(snapshot["reading_age_seconds"], errors="coerce") if "reading_age_seconds" in snapshot.columns else pd.Series(dtype=float)
         values = pd.to_numeric(snapshot["estimated_value"], errors="coerce") if "estimated_value" in snapshot.columns else pd.Series(dtype=float)
         meta = {
@@ -350,7 +364,8 @@ class TwinDataService:
             "snapshot": frame_records(snapshot),
             "grid": frame_records(grid),
             "reliability_grid": frame_records(reliability_grid),
-            "zones": {"type": "FeatureCollection", "features": []},
+            "zones": colored_zones,
+            "zone_summary": frame_records(zones),
             "layers": data["layers"],
             "stations": frame_records(stations),
             "meta": meta,
@@ -406,6 +421,16 @@ class TwinDataService:
             return []
         subset = observations[(observations["pollutant"] == pollutant) & (observations["sensor_name"] == sensor_name)]
         return frame_records(subset.sort_values("timestamp"))
+
+    def analytics(self, pollutant: str, timestamp: str | None = None) -> dict[str, Any]:
+        data = self.load()
+        return analytics_payload(
+            data["observations"],
+            data["estimates"],
+            data["layers"]["zones"],
+            pollutant,
+            timestamp,
+        )
 
 
 @lru_cache(maxsize=1)

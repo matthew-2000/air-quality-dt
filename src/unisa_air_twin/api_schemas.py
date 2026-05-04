@@ -97,6 +97,7 @@ class MapPayloadResponse(BaseModel):
     grid: list[dict[str, Any]]
     reliability_grid: list[dict[str, Any]]
     zones: dict[str, Any]
+    zone_summary: list[dict[str, Any]] = []
     layers: dict[str, dict[str, Any]]
     stations: list[dict[str, Any]]
     meta: dict[str, Any]
@@ -114,3 +115,14 @@ class SensorDetailResponse(BaseModel):
     latest_values: list[dict[str, Any]]
     history: dict[str, list[dict[str, Any]]]
     environment: dict[str, Any]
+
+
+class AnalyticsResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    pollutant: str
+    timestamp: str | None = None
+    quality: dict[str, Any]
+    zone_summary: list[dict[str, Any]]
+    zone_geojson: dict[str, Any]
+    trend: list[dict[str, Any]]

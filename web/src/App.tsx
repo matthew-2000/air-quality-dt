@@ -36,7 +36,8 @@ import {
 import { CoverageBar } from "./components/CoverageBar";
 import { EmptyStatePanel } from "./components/EmptyStatePanel";
 import { SummaryCard } from "./components/SummaryCard";
-import type { FeatureCollection, HistoryPoint, LatLon, LayerVisibility, MapPayload, MapView, SensorDetail, SnapshotSensor, Summary } from "./types";
+import { TwinAnalyticsPanel } from "./components/TwinAnalyticsPanel";
+import type { AnalyticsPayload, FeatureCollection, HistoryPoint, LatLon, LayerVisibility, MapPayload, MapView, SensorDetail, SnapshotSensor, Summary } from "./types";
 
 const layerLabels: Array<{ id: keyof LayerVisibility; label: string; icon: ReactNode }> = [
   { id: "buildings", label: "Edifici", icon: <MapIcon size={14} /> },
@@ -340,6 +341,7 @@ function App() {
   const [pollutant, setPollutant] = useState("pm10");
   const [timestamp, setTimestamp] = useState<string | null>(null);
   const [mapData, setMapData] = useState<MapPayload>();
+  const [analytics, setAnalytics] = useState<AnalyticsPayload>();
   const [sensorDetail, setSensorDetail] = useState<SensorDetail | null>(null);
   const [selectedSensorId, setSelectedSensorId] = useState<string | null>(null);
   const [layerVisibility, setLayerVisibility] = useState<LayerVisibility>(defaultLayers);
@@ -349,6 +351,7 @@ function App() {
   const [refreshTick, setRefreshTick] = useState(0);
   const [isSummaryLoading, setSummaryLoading] = useState(true);
   const [isMapLoading, setMapLoading] = useState(false);
+  const [isAnalyticsLoading, setAnalyticsLoading] = useState(false);
   const [isSensorLoading, setSensorLoading] = useState(false);
   const [isRefreshing, setRefreshing] = useState(false);
   const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
@@ -415,6 +418,28 @@ function App() {
       })
       .finally(() => {
         if (!cancelled) setMapLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pollutant, timestamp, refreshTick]);
+
+  useEffect(() => {
+    if (!pollutant) return;
+    let cancelled = false;
+    const timestampQuery = timestamp ? `&timestamp=${encodeURIComponent(timestamp)}` : "";
+    setAnalyticsLoading(true);
+    getJson<AnalyticsPayload>(`/api/analytics?pollutant=${encodeURIComponent(pollutant)}${timestampQuery}`)
+      .then((payload) => {
+        if (cancelled) return;
+        setAnalytics(payload);
+        setError(null);
+      })
+      .catch((reason) => {
+        if (!cancelled) setError(requestMessage(reason));
+      })
+      .finally(() => {
+        if (!cancelled) setAnalyticsLoading(false);
       });
     return () => {
       cancelled = true;
@@ -502,7 +527,7 @@ function App() {
   const rawMessageRows = summary?.raw_message_rows ?? summary?.ingestion?.raw_message_rows;
   const hasObservations = Boolean(summary?.latest_timestamp && summary.pollutants.length && summary.rows > 0);
   const dashboardReady = Boolean(summary && (mapData || !hasObservations));
-  const isLoading = isSummaryLoading || isMapLoading || isSensorLoading || isRefreshing;
+  const isLoading = isSummaryLoading || isMapLoading || isAnalyticsLoading || isSensorLoading || isRefreshing;
   const loadingTitle = error ? "Dashboard non disponibile" : "Allineamento dashboard";
   const loadingCopy = isSummaryLoading
     ? "Lettura dello stato API e dello snapshot più recente."
@@ -533,6 +558,7 @@ function App() {
 
         <nav className="rail-nav" aria-label="Sezioni dashboard">
           <a href="#monitor">Monitor</a>
+          <a href="#analytics">Twin</a>
           <a href="#sensors">Sensori</a>
           <a href="#history">Storico</a>
           <a href="#provenance">Dati</a>
@@ -840,6 +866,8 @@ function App() {
             </div>
           </article>
         </section>
+
+        <TwinAnalyticsPanel analytics={analytics} />
 
         <section className="panel table-panel" id="sensors">
           <div className="panel-head">

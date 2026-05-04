@@ -6,6 +6,7 @@ from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from unisa_air_twin.api_schemas import (
+    AnalyticsResponse,
     MapPayloadResponse,
     RefreshResponse,
     SensorDetailResponse,
@@ -76,3 +77,8 @@ def timeseries(pollutant: str = Query(...), sensor_name: str = Query(...)) -> Ti
 @app.get("/api/sensor-detail", response_model=SensorDetailResponse)
 def sensor_detail(sensor_id: str = Query(...), timestamp: str = Query(...)) -> SensorDetailResponse:
     return get_twin_service().sensor_detail(sensor_id, timestamp)
+
+
+@app.get("/api/analytics", response_model=AnalyticsResponse)
+def analytics(pollutant: str = Query(...), timestamp: str | None = Query(default=None)) -> AnalyticsResponse:
+    return get_twin_service().analytics(pollutant, timestamp)

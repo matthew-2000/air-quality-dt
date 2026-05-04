@@ -94,6 +94,7 @@ export type MapPayload = {
   grid: GridCell[];
   reliability_grid: GridCell[];
   zones: FeatureCollection;
+  zone_summary?: ZoneSummaryRow[];
   layers: Record<string, FeatureCollection>;
   stations: LatLon[];
   meta?: {
@@ -155,3 +156,46 @@ export type LayerVisibility = Record<"buildings" | "roads" | "green" | "transpor
 export type MapView = "surface" | "sensors" | "coverage";
 
 export type LayerLabel = { id: keyof LayerVisibility; label: string; icon: ReactNode };
+
+export type QualityFlagRow = {
+  flag: string;
+  rows: number;
+};
+
+export type QualitySummary = {
+  rows: number;
+  ok_rows: number;
+  watch_rows: number;
+  critical_rows: number;
+  ok_ratio: number;
+  flags: QualityFlagRow[];
+};
+
+export type ZoneSummaryRow = {
+  zone: string;
+  zone_name?: string;
+  mean_value?: number | null;
+  max_value?: number | null;
+  min_value?: number | null;
+  sensors?: number;
+  quality_ok_ratio?: number;
+  traffic_sensitivity?: number | null;
+  green_capacity?: number | null;
+};
+
+export type TrendPoint = {
+  timestamp: string;
+  mean_value: number;
+  max_value: number;
+  min_value: number;
+  sensors: number;
+};
+
+export type AnalyticsPayload = {
+  pollutant: string;
+  timestamp: string | null;
+  quality: QualitySummary;
+  zone_summary: ZoneSummaryRow[];
+  zone_geojson: FeatureCollection;
+  trend: TrendPoint[];
+};
