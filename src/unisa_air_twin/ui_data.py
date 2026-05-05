@@ -14,6 +14,7 @@ from unisa_air_twin.analytics import (
 )
 from unisa_air_twin.config import Settings, load_settings
 from unisa_air_twin.data_quality import annotate_quality
+from unisa_air_twin.external_sources import read_source_statuses
 from unisa_air_twin.gis import (
     available_timestamps,
     build_interpolation_grid,
@@ -254,6 +255,7 @@ class TwinDataService:
             "layer_counts": layer_counts,
             "ingestion": ingestion,
             "live_feed": live_feed,
+            "data_sources": ingestion.get("sources") if isinstance(ingestion.get("sources"), list) else read_source_statuses(self.settings),
             "warnings": data["schema_report"].get("warnings", []),
             "mode": "real_only",
         }
@@ -409,6 +411,12 @@ class TwinDataService:
                 "temperature": latest_environment_row.get("temperature"),
                 "humidity": latest_environment_row.get("humidity"),
                 "num_devices_sniffed": latest_environment_row.get("num_devices_sniffed"),
+                "traffic_index": latest_environment_row.get("traffic_index"),
+                "green_index": latest_environment_row.get("green_index"),
+                "wind_speed_10m": latest_environment_row.get("wind_speed_10m"),
+                "precipitation": latest_environment_row.get("precipitation"),
+                "background_value": latest_environment_row.get("background_value"),
+                "background_source": latest_environment_row.get("background_source"),
                 "received_at": pd.Timestamp(latest_environment_row["received_at"]).strftime("%Y-%m-%dT%H:%M:%S")
                 if latest_environment_row.get("received_at") is not None and pd.notna(latest_environment_row.get("received_at"))
                 else None,

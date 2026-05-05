@@ -27,6 +27,26 @@ live_sensors:
     mqtt_csv_path: data/raw/live_sensors/mqtt_data.csv
     mqtt_jsonl_path: data/raw/live_sensors/mqtt_raw.jsonl
 
+external_sources:
+  open_meteo:
+    cache_dir: data/raw/external
+    request_timeout_seconds: 10
+    max_cache_age_minutes: 60
+    weather_url: https://api.open-meteo.com/v1/forecast
+    air_quality_url: https://air-quality-api.open-meteo.com/v1/air-quality
+    weather_current:
+      - temperature_2m
+      - relative_humidity_2m
+      - precipitation
+      - wind_speed_10m
+      - wind_direction_10m
+    air_quality_current:
+      - pm10
+      - pm2_5
+      - nitrogen_dioxide
+      - ozone
+      - european_aqi
+
 model:
   pollutants: ["pm1", "pm25", "pm10", "voc_index", "nox_index"]
   idw_power: 2.0

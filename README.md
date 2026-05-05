@@ -6,7 +6,7 @@ Oggi il prodotto attivo e supportato e' questo:
 
 - frontend React in `web/`
 - API FastAPI in `api/`
-- ingestione MQTT e dataset operativi in `scripts/` e `src/unisa_air_twin/`
+- job dati, ingestione MQTT e store operativo in `src/unisa_air_twin/`
 
 Il vecchio ramo Streamlit e la simulazione scenario non fanno piu' parte dell'app corrente.
 
@@ -57,43 +57,28 @@ UNISA_MQTT_TOPIC="#"
 
 ## Dati
 
-### Solo layer campus
+Il flusso prodotto non richiede comandi terminale per l'utente finale. La dashboard include la sezione **Gestione dati** e usa questi job API:
 
-```bash
-python3 scripts/download_data.py
-```
+- `POST /api/jobs/context`: aggiorna sensori, zone e layer campus.
+- `POST /api/jobs/snapshots`: rilegge lo storico MQTT raw e ricostruisce il dataset operativo.
+- `POST /api/jobs/refresh`: ricostruisce gli snapshot dallo store operativo.
+- `POST /api/jobs/enrich`: aggiorna fonti gratuite esterne e arricchisce osservazioni/snapshot.
+- `GET /api/jobs`: mostra stato, errori e risultato delle operazioni avviate.
+- `GET /api/sources`: mostra salute, cache e provenance delle fonti dati.
+- `GET /api/export/{observations|sensors|raw-messages}?format=csv|json`: scarica dati disponibili.
 
-oppure:
+Gli script in `scripts/` restano utility di sviluppo e compatibilita', ma non sono il percorso utente primario.
 
-```bash
-make data
-```
+## Fonti dati
 
-`make data` costruisce anche i dataset locali disponibili.
+Il digital twin usa una provenance esplicita per ogni fonte:
 
-### Un giro di ingest live
+- sensori UNISA via MQTT configurato localmente;
+- OpenStreetMap per verde, viabilita' ed edifici campus;
+- Open-Meteo Weather per vento, pioggia e meteo operativo;
+- Open-Meteo Air Quality per background PM/NO2/O3/AQI.
 
-```bash
-make data-live
-```
-
-Durata personalizzata:
-
-```bash
-make data-live MQTT_DURATION=180
-```
-
-### Ingestione continua
-
-```bash
-make ingest-live MQTT_DURATION=30 MQTT_INTERVAL=5
-```
-
-Se l'API e' gia' attiva e vuoi notificare lo stream SSE dopo ogni export:
-
-```bash
-UNISA_AQDT_NOTIFY_URL=http://127.0.0.1:8000/api/events/snapshot make ingest-live MQTT_DURATION=30 MQTT_INTERVAL=5
-```
+Le risposte Open-Meteo sono salvate in `data/raw/external/` e riusate come cache se la rete non e' disponibile.
 
 ## Avvio App
 
@@ -108,13 +93,11 @@ Avvia:
 - API su `http://127.0.0.1:8000`
 - frontend su `http://127.0.0.1:5173`
 
-### Modalita' live completa: API + frontend + ingestione continua
+Per sviluppo con ingestione continua puoi passare argomenti al runner:
 
 ```bash
-make dev-live MQTT_DURATION=30 MQTT_INTERVAL=5
+make dev DEV_ARGS="--with-ingest --mqtt-duration 30 --mqtt-interval 5"
 ```
-
-Questa modalita' richiede le variabili MQTT configurate e collega automaticamente l'ingestione allo stream SSE dell'API.
 
 ## Pulizia workspace
 
@@ -122,24 +105,6 @@ Per rimuovere cache Python e build frontend:
 
 ```bash
 make clean
-```
-
-Per eliminare gli screenshot temporanei di QA UI:
-
-```bash
-make clean-ui
-```
-
-Per azzerare tutti i dati live locali:
-
-```bash
-make clean-data-live
-```
-
-Per eliminare i file dati legacy del sistema precedente:
-
-```bash
-make clean-data-legacy
 ```
 
 ### Avvio separato
@@ -156,6 +121,12 @@ Frontend:
 make web
 ```
 
+Build frontend:
+
+```bash
+make build
+```
+
 ## Flusso operativo consigliato
 
 Per preparare una macchina nuova:
@@ -163,13 +134,13 @@ Per preparare una macchina nuova:
 1. clona il repository;
 2. esegui `make bootstrap`;
 3. crea `.env.local` da `.env.example`;
-4. esegui `make data-live`;
-5. avvia `make dev`.
+4. avvia `make dev`;
+5. usa **Gestione dati** nella dashboard per preparare contesto, dataset e snapshot.
 
 Per sviluppo con feed live continuo:
 
 1. verifica `.env.local`;
-2. esegui `make dev-live`.
+2. esegui `make dev DEV_ARGS="--with-ingest --mqtt-duration 30 --mqtt-interval 5"`.
 
 ## Output principali
 
@@ -184,5 +155,7 @@ Per sviluppo con feed live continuo:
 
 - MQTT non e' uno storico completo: ricevi i messaggi mentre il client e' connesso, piu' eventuali retained.
 - Il backend usa lo store SQLite operativo come sorgente primaria per la dashboard.
+- Le fonti esterne gratuite sono cache-first: un errore rete non blocca la dashboard se esiste cache locale.
+- Gli export CSV/JSON sono generati dall'API a partire dallo store operativo.
 - Il frontend riceve aggiornamenti live via SSE dall'API e ricarica summary, mappa, analytics e dettaglio quando l'ingestione notifica un nuovo snapshot operativo.
 - Se `EventSource` non e' disponibile nel browser, il frontend mantiene un fallback a polling HTTP ogni 60 secondi.

@@ -15,6 +15,7 @@ class Settings(BaseModel):
     paths: dict[str, str]
     campus: dict[str, Any]
     live_sensors: dict[str, Any] = Field(default_factory=dict)
+    external_sources: dict[str, Any] = Field(default_factory=dict)
     model: dict[str, Any]
 
     raw_dir: Path = Field(default_factory=lambda: project_path("data/raw"))

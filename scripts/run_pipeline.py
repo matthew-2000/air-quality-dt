@@ -7,9 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from unisa_air_twin.config import load_settings
-from unisa_air_twin.live_sensors import build_realtime_dataset, write_real_sensor_geojson
-from unisa_air_twin.osm import download_osm
-from unisa_air_twin.zones import ensure_twin_layers
+from unisa_air_twin.product_jobs import prepare_context_layers, rebuild_operational_dataset
 
 
 def main() -> None:
@@ -19,12 +17,11 @@ def main() -> None:
 
     settings = load_settings()
     print("1/3 Downloading OSM campus layers and preparing real sensors...")
-    download_osm(settings, force=args.force)
-    write_real_sensor_geojson(settings)
-    ensure_twin_layers(settings)
+    context = prepare_context_layers(settings, force=args.force)
+    print(f"   Sensors: {context['sensors']:,} · layers: {context['layers']}")
     print("2/3 Building observations from UNISA MQTT exports...")
-    observations = build_realtime_dataset(settings)
-    print(f"   Real sensor rows available: {len(observations):,}")
+    result = rebuild_operational_dataset(settings)
+    print(f"   Snapshot rows available: {result['snapshot_rows']:,}")
     print("3/3 Pipeline complete. Start the cockpit with `make dev`.")
 
 

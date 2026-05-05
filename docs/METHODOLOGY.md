@@ -9,9 +9,11 @@ Il Digital Twin mostra lo stato ambientale del campus usando misure reali dei se
 La pipeline attuale e' questa:
 
 1. ingestione MQTT dal broker configurato via `.env` o `.env.local`
-2. normalizzazione dei messaggi in osservazioni sensore
-3. scrittura nello store operativo SQLite
-4. generazione degli artifact usati da dashboard e audit
+2. aggiornamento fonti gratuite esterne quando richiesto dalla dashboard
+3. normalizzazione dei messaggi in osservazioni sensore
+4. arricchimento con meteo, background aria, pressione traffico e verde OSM
+5. scrittura nello store operativo SQLite
+6. generazione degli artifact usati da dashboard e audit
 
 ## Store operativo
 
@@ -24,6 +26,7 @@ Contiene almeno:
 - catalogo sensori
 - messaggi raw MQTT
 - osservazioni normalizzate
+- componenti di arricchimento e provenance
 - metadata dell'ultimo export
 
 I parquet e i json processati restano output secondari per compatibilita', export e ispezione.
@@ -49,9 +52,22 @@ Per ogni riga operativa il sistema conserva:
 - inquinante
 - valore stimato/base
 - metriche ambientali accessorie
+- componenti traffico, verde, vento, pioggia e background esterno
 - indicatori di freschezza e copertura
 
-## Analytics Sprint 2
+## Fonti e Arricchimento
+
+Il sistema usa fonti gratuite con cache locale e stato esplicito:
+
+- OpenStreetMap: contesto campus, verde, strade, edifici
+- Open-Meteo Weather: vento, precipitazione e meteo operativo
+- Open-Meteo Air Quality: background PM10, PM2.5, NO2, O3 e AQI europeo
+
+Il valore `base_value` resta la misura sensore normalizzata. Il valore `estimated_value` applica componenti modellistiche leggere basate su traffico osservato dal payload, verde OSM, vento e pioggia. Ogni riga conserva anche `background_value`, `background_source`, `source_url` e `uncertainty_score`.
+
+Le fonti sono esposte da `/api/sources`. Gli export sono esposti da `/api/export/{dataset}`.
+
+## Analytics
 
 Il livello analytics aggiunge tre letture sopra lo snapshot operativo:
 
@@ -63,9 +79,9 @@ Queste metriche non sostituiscono la misura raw. Servono a rendere il Digital Tw
 
 L'endpoint `/api/analytics` restituisce qualita' complessiva, riepilogo zone, GeoJSON colorato delle zone e serie temporale recente per l'inquinante selezionato.
 
-## Realtime Sprint 3
+## Realtime
 
-Il terzo sprint completa il passaggio a Digital Twin operativo sul lato runtime:
+Il runtime usa stream SSE:
 
 - l'API espone uno stream SSE che osserva lo stato dello snapshot operativo
 - l'ingestione MQTT notifica l'API dopo ogni export operativo tramite `POST /api/events/snapshot`

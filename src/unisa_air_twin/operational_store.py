@@ -31,6 +31,10 @@ OBSERVATION_COLUMNS = [
     "precipitation",
     "traffic_component",
     "green_component",
+    "wind_component",
+    "rain_component",
+    "background_value",
+    "background_source",
     "station_count",
     "nearest_station_km",
     "mean_station_distance_km",
@@ -139,6 +143,10 @@ def ensure_schema(settings: Settings) -> None:
                     precipitation REAL,
                     traffic_component REAL,
                     green_component REAL,
+                    wind_component REAL,
+                    rain_component REAL,
+                    background_value REAL,
+                    background_source TEXT,
                     station_count INTEGER,
                     nearest_station_km REAL,
                     mean_station_distance_km REAL,
@@ -181,6 +189,17 @@ def ensure_schema(settings: Settings) -> None:
                 ON CONFLICT(key) DO NOTHING
                 """
             )
+            existing_columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(observations)").fetchall()
+            }
+            for column_name, column_type in [
+                ("wind_component", "REAL"),
+                ("rain_component", "REAL"),
+                ("background_value", "REAL"),
+                ("background_source", "TEXT"),
+            ]:
+                if column_name not in existing_columns:
+                    connection.execute(f"ALTER TABLE observations ADD COLUMN {column_name} {column_type}")
         _INITIALIZED_DATABASES.add(db_key)
 
 

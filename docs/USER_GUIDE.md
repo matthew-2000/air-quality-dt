@@ -9,6 +9,8 @@ La dashboard mostra le misure reali piu' recenti dei sensori UNISA sul campus.
 - **Twin analytics**: qualita' del dato, trend campus e riepilogo delle zone operative.
 - **Dettaglio sensore**: ultima misura disponibile, freschezza del dato e storico recente.
 - **Stato ingestione**: quanti dati sono disponibili e se il feed live e' attivo, stale o non configurato.
+- **Gestione dati**: operazioni per aggiornare contesto, ricostruire dataset e aggiornare snapshot senza usare terminale.
+- **Fonti dati**: stato di OpenStreetMap, Open-Meteo Weather e Open-Meteo Air Quality.
 
 ## Inquinanti disponibili
 
@@ -38,19 +40,22 @@ Stati feed:
 
 Se il browser non supporta SSE, la UI torna automaticamente a un polling HTTP periodico.
 
-Per aggiornare il feed:
+Per aggiornare i dati dalla UI usa **Gestione dati**:
 
-```bash
-make ingest-live MQTT_DURATION=30 MQTT_INTERVAL=5
-```
+- **Aggiorna snapshot**: ricalcola la vista operativa dai dati gia' acquisiti.
+- **Ricostruisci dataset**: normalizza lo storico MQTT raw e rigenera gli snapshot.
+- **Aggiorna contesto**: aggiorna sensori, zone e layer campus.
+- **Arricchisci fonti**: aggiorna meteo, qualita' aria esterna, verde e componenti del modello.
 
-oppure avvia tutto insieme:
+Quando un job cambia i dati, la dashboard ricarica summary, mappa, analytics e dettaglio.
 
-```bash
-make dev-live MQTT_DURATION=30 MQTT_INTERVAL=5
-```
+## Download dati
 
-In modalita' `dev-live`, ogni ciclo di ingestione notifica automaticamente l'API e la dashboard si aggiorna senza attendere un polling periodico.
+La sezione **Gestione dati** espone download diretti:
+
+- osservazioni normalizzate in CSV;
+- catalogo sensori in JSON;
+- messaggi MQTT raw in CSV.
 
 ## Limiti
 

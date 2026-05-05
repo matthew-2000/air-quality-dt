@@ -187,6 +187,6 @@ def create_digital_twin_entities(settings: Settings) -> dict:
     return payload
 
 
-def ensure_twin_layers(settings: Settings) -> None:
+def ensure_twin_layers(settings: Settings) -> dict:
     create_campus_zones(settings)
-    create_digital_twin_entities(settings)
+    return create_digital_twin_entities(settings)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 
+import pandas as pd
 from fastapi.testclient import TestClient
 
 import api.main as api_main
@@ -131,3 +132,45 @@ def test_stream_emits_connected_event(monkeypatch) -> None:
     payload = json.loads(data_line.removeprefix("data: "))
     assert payload["snapshot_rows"] == 0
     assert payload["live_feed_status"] == "unknown"
+
+
+def test_refresh_job_contract(monkeypatch) -> None:
+    monkeypatch.setattr(api_main, "get_twin_service", lambda: FakeTwinService())
+    monkeypatch.setattr(api_main, "refresh_operational_snapshots", lambda _settings: {"snapshot_rows": 3})
+    client = TestClient(api_main.app)
+
+    response = client.post("/api/jobs/refresh")
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["name"] == "refresh_snapshots"
+    assert payload["status"] in {"queued", "running", "completed"}
+
+    detail = client.get(f"/api/jobs/{payload['job_id']}")
+    assert detail.status_code == 200
+    assert detail.json()["result"].get("snapshot_rows") == 3
+
+
+def test_export_observations_contract(monkeypatch) -> None:
+    monkeypatch.setattr(
+        api_main,
+        "read_observations",
+        lambda _settings: pd.DataFrame([{"sensor_id": "A", "pollutant": "pm10", "estimated_value": 12.5}]),
+    )
+    client = TestClient(api_main.app)
+
+    response = client.get("/api/export/observations?format=csv")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert "sensor_id,pollutant,estimated_value" in response.text
+
+
+def test_sources_contract(monkeypatch) -> None:
+    monkeypatch.setattr(api_main, "read_source_statuses", lambda _settings: [{"source_id": "osm_green", "status": "available"}])
+    client = TestClient(api_main.app)
+
+    response = client.get("/api/sources")
+
+    assert response.status_code == 200
+    assert response.json()["sources"][0]["source_id"] == "osm_green"

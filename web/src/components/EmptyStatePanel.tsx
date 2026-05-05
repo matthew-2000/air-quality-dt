@@ -18,7 +18,7 @@ export function EmptyStatePanel({
       </div>
       <p>
         Il catalogo contiene {summary.sensors} sensori, ma lo store operativo non ha ancora letture normalizzate.
-        Avvia l'ingestione MQTT e poi aggiorna la dashboard.
+        Usa la gestione dati della dashboard per ricostruire dataset e snapshot quando il feed MQTT e' configurato.
       </p>
       <div className="dataset-grid">
         <div>
@@ -40,8 +40,8 @@ export function EmptyStatePanel({
           </strong>
         </div>
         <div>
-          <span>Comando operativo</span>
-          <strong>make data-live</strong>
+          <span>Prossima azione</span>
+          <strong>Gestione dati</strong>
         </div>
       </div>
     </section>

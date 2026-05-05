@@ -34,6 +34,7 @@ import {
   statusTone,
 } from "./format";
 import { CoverageBar } from "./components/CoverageBar";
+import { DataJobsPanel } from "./components/DataJobsPanel";
 import { EmptyStatePanel } from "./components/EmptyStatePanel";
 import { SummaryCard } from "./components/SummaryCard";
 import { TwinAnalyticsPanel } from "./components/TwinAnalyticsPanel";
@@ -564,6 +565,10 @@ function App() {
       .finally(() => setRefreshing(false));
   };
 
+  const handleDataChanged = () => {
+    setRefreshTick((current) => current + 1);
+  };
+
   const activeSnapshot = mapData?.snapshot ?? [];
   const filteredSnapshot = useMemo(() => {
     const query = deferredSearch.trim().toLowerCase();
@@ -685,7 +690,12 @@ function App() {
         {liveWarning ? <div className="error-banner" role="alert">{liveWarning}</div> : null}
 
         {!hasObservations && summary ? (
-          <EmptyStatePanel summary={summary} observationRows={observationRows} />
+          <>
+            <EmptyStatePanel summary={summary} observationRows={observationRows} />
+            <section className="provenance-grid" id="provenance">
+              <DataJobsPanel onDataChanged={handleDataChanged} />
+            </section>
+          </>
         ) : (
           <>
         <section className="summary-grid">
@@ -916,6 +926,27 @@ function App() {
                   <strong>{formatNumber(sensorDetail?.environment.num_devices_sniffed, 0)}</strong>
                 </div>
               </div>
+              <div>
+                <Gauge size={16} />
+                <div>
+                  <span>Vento 10m</span>
+                  <strong>{formatNumber(sensorDetail?.environment.wind_speed_10m, 1)} km/h</strong>
+                </div>
+              </div>
+              <div>
+                <Trees size={16} />
+                <div>
+                  <span>Indice verde</span>
+                  <strong>{formatNumber(sensorDetail?.environment.green_index, 2)}</strong>
+                </div>
+              </div>
+              <div>
+                <Archive size={16} />
+                <div>
+                  <span>Background</span>
+                  <strong>{formatNumber(sensorDetail?.environment.background_value, 1)}</strong>
+                </div>
+              </div>
             </div>
           </article>
 
@@ -1024,6 +1055,8 @@ function App() {
               <li>Layer di contesto campus da OpenStreetMap: {Object.entries(layerCountSummary).map(([key, value]) => `${key} ${value}`).join(" · ")}.</li>
             </ul>
           </article>
+
+          <DataJobsPanel onDataChanged={handleDataChanged} />
 
           <article className="panel provenance-panel">
             <div className="panel-head">

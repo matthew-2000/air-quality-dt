@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CampusInfo(BaseModel):
@@ -84,6 +84,21 @@ class SummaryResponse(BaseModel):
 class RefreshResponse(BaseModel):
     status: str
     snapshot_rows: int
+
+
+class JobRunResponse(BaseModel):
+    job_id: str
+    name: str
+    status: Literal["queued", "running", "completed", "failed"]
+    started_at: str
+    finished_at: str | None = None
+    message: str | None = None
+    result: dict[str, Any] = Field(default_factory=dict)
+    error: str | None = None
+
+
+class JobListResponse(BaseModel):
+    jobs: list[JobRunResponse]
 
 
 class TimestampsResponse(BaseModel):

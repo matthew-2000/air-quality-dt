@@ -63,6 +63,7 @@ export type Summary = {
     latest_received_at?: string | null;
     age_minutes?: number | null;
   };
+  data_sources?: DataSourceStatus[];
   warnings: unknown[];
   mode?: string;
 };
@@ -147,6 +148,12 @@ export type SensorDetail = {
     temperature?: number | null;
     humidity?: number | null;
     num_devices_sniffed?: number | null;
+    traffic_index?: number | null;
+    green_index?: number | null;
+    wind_speed_10m?: number | null;
+    precipitation?: number | null;
+    background_value?: number | null;
+    background_source?: string | null;
     received_at?: string | null;
   };
 };
@@ -212,4 +219,34 @@ export type LiveStreamEvent = {
   active_sensors: number;
   live_feed_status?: "live" | "stale" | "unconfigured" | "unknown" | null;
   generated_at?: string | null;
+};
+
+export type ProductJob = {
+  job_id: string;
+  name: string;
+  status: "queued" | "running" | "completed" | "failed";
+  started_at: string;
+  finished_at?: string | null;
+  message?: string | null;
+  result?: Record<string, unknown>;
+  error?: string | null;
+};
+
+export type ProductJobList = {
+  jobs: ProductJob[];
+};
+
+export type DataSourceStatus = {
+  source_id: string;
+  label: string;
+  status: string;
+  source_url?: string;
+  fetched_at?: string | null;
+  cache_path?: string | null;
+  error?: string | null;
+  features?: number;
+};
+
+export type DataSourceList = {
+  sources: DataSourceStatus[];
 };

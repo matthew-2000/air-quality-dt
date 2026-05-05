@@ -1,17 +1,19 @@
 from __future__ import annotations
 
-import asyncio
-import json
 from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
 import anyio
-from fastapi import FastAPI, Query, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
+from api.events import snapshot_events
+from api.streaming import summary_stream
 from unisa_air_twin.api_schemas import (
     AnalyticsResponse,
+    JobListResponse,
+    JobRunResponse,
     MapPayloadResponse,
     RefreshResponse,
     SensorDetailResponse,
@@ -20,40 +22,16 @@ from unisa_air_twin.api_schemas import (
     TimestampsResponse,
 )
 from unisa_air_twin.config import load_settings
-from unisa_air_twin.live_sensors import export_operational_artifacts
+from unisa_air_twin.external_sources import read_source_statuses
+from unisa_air_twin.operational_store import read_observations, read_raw_messages, read_sensors
+from unisa_air_twin.product_jobs import (
+    job_registry,
+    prepare_context_layers,
+    rebuild_operational_dataset,
+    refresh_external_sources,
+    refresh_operational_snapshots,
+)
 from unisa_air_twin.ui_data import get_twin_service
-
-STREAM_HEARTBEAT_SECONDS = 30.0
-STREAM_RETRY_MILLISECONDS = 5000
-
-
-class SnapshotEventBus:
-    def __init__(self) -> None:
-        self._condition = asyncio.Condition()
-        self._version = 0
-
-    @property
-    def version(self) -> int:
-        return self._version
-
-    async def notify(self) -> int:
-        async with self._condition:
-            self._version += 1
-            self._condition.notify_all()
-            return self._version
-
-    async def wait_for_change(self, version: int, timeout: float) -> int:
-        async with self._condition:
-            if self._version != version:
-                return self._version
-            try:
-                await asyncio.wait_for(self._condition.wait_for(lambda: self._version != version), timeout=timeout)
-            except TimeoutError:
-                return version
-            return self._version
-
-
-snapshot_events = SnapshotEventBus()
 
 app = FastAPI(
     title="UNISA Air Quality Digital Twin API",
@@ -80,80 +58,9 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-def _summary_stream_fingerprint(summary: dict[str, Any]) -> str:
-    coverage_rows = [
-        {
-            "pollutant": row.get("pollutant"),
-            "active_sensors": row.get("active_sensors"),
-            "capable_sensors": row.get("capable_sensors"),
-            "coverage_ratio": row.get("coverage_ratio"),
-        }
-        for row in summary.get("coverage_by_pollutant", [])
-        if isinstance(row, dict)
-    ]
-    fingerprint_payload = {
-        "latest_timestamp": summary.get("latest_timestamp"),
-        "latest_received_at": summary.get("latest_received_at"),
-        "rows": summary.get("rows"),
-        "snapshot_rows": summary.get("snapshot_rows"),
-        "observation_rows": summary.get("observation_rows"),
-        "raw_message_rows": summary.get("raw_message_rows"),
-        "active_sensors": summary.get("active_sensors"),
-        "capable_sensors": summary.get("capable_sensors"),
-        "coverage_by_pollutant": coverage_rows,
-        "generated_at": summary.get("ingestion", {}).get("generated_at") if isinstance(summary.get("ingestion"), dict) else None,
-        "live_feed_status": summary.get("live_feed", {}).get("status") if isinstance(summary.get("live_feed"), dict) else None,
-    }
-    return json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":"))
-
-
-def _summary_stream_payload(summary: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "fingerprint": _summary_stream_fingerprint(summary),
-        "latest_timestamp": summary.get("latest_timestamp"),
-        "latest_received_at": summary.get("latest_received_at"),
-        "snapshot_rows": int(summary.get("snapshot_rows", 0) or 0),
-        "observation_rows": int(summary.get("observation_rows", 0) or 0),
-        "raw_message_rows": int(summary.get("raw_message_rows", 0) or 0),
-        "active_sensors": int(summary.get("active_sensors", 0) or 0),
-        "live_feed_status": summary.get("live_feed", {}).get("status") if isinstance(summary.get("live_feed"), dict) else None,
-        "generated_at": summary.get("ingestion", {}).get("generated_at") if isinstance(summary.get("ingestion"), dict) else None,
-    }
-
-
-def _sse_event(name: str, payload: dict[str, Any], retry: int | None = None) -> str:
-    lines: list[str] = []
-    if retry is not None:
-        lines.append(f"retry: {retry}")
-    lines.append(f"event: {name}")
-    body = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-    for line in body.splitlines() or [body]:
-        lines.append(f"data: {line}")
-    return "\n".join(lines) + "\n\n"
-
-
 async def _summary_stream(request: Request) -> AsyncIterator[str]:
-    last_fingerprint: str | None = None
-    observed_version = snapshot_events.version
-    service = get_twin_service()
-    while True:
-        if await request.is_disconnected():
-            break
-        try:
-            payload = _summary_stream_payload(service.summary())
-            if payload["fingerprint"] != last_fingerprint:
-                event_name = "connected" if last_fingerprint is None else "snapshot_update"
-                retry = STREAM_RETRY_MILLISECONDS if last_fingerprint is None else None
-                yield _sse_event(event_name, payload, retry=retry)
-                last_fingerprint = str(payload["fingerprint"])
-        except Exception as exc:
-            yield _sse_event("stream_error", {"message": str(exc)})
-        current_version = snapshot_events.version
-        observed_version = current_version
-        next_version = await snapshot_events.wait_for_change(observed_version, STREAM_HEARTBEAT_SECONDS)
-        if next_version == observed_version:
-            yield ": heartbeat\n\n"
-        observed_version = next_version
+    async for event in summary_stream(request, snapshot_events, get_twin_service):
+        yield event
 
 
 @app.get("/api/summary", response_model=SummaryResponse)
@@ -163,10 +70,109 @@ def summary() -> SummaryResponse:
 
 @app.post("/api/refresh", response_model=RefreshResponse)
 async def refresh() -> RefreshResponse:
-    snapshots = await anyio.to_thread.run_sync(export_operational_artifacts, load_settings())
+    result = await anyio.to_thread.run_sync(refresh_operational_snapshots, load_settings())
     get_twin_service().refresh()
     await snapshot_events.notify()
-    return {"status": "refreshed", "snapshot_rows": int(len(snapshots))}
+    return {"status": "refreshed", "snapshot_rows": int(result["snapshot_rows"])}
+
+
+async def _run_job_and_notify(job_id: str, task: Any, refresh_view: bool = True) -> None:
+    await anyio.to_thread.run_sync(job_registry.run, job_id, task)
+    if refresh_view:
+        get_twin_service().refresh()
+        await snapshot_events.notify()
+
+
+def _job_response(job_id: str) -> dict[str, Any]:
+    job = job_registry.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job.to_dict()
+
+
+@app.get("/api/jobs", response_model=JobListResponse)
+def jobs(limit: Annotated[int, Query(ge=1, le=50)] = 20) -> JobListResponse:
+    return {"jobs": [job.to_dict() for job in job_registry.list(limit=limit)]}
+
+
+@app.get("/api/jobs/{job_id}", response_model=JobRunResponse)
+def job_detail(job_id: str) -> JobRunResponse:
+    return _job_response(job_id)
+
+
+@app.post("/api/jobs/refresh", response_model=JobRunResponse, status_code=202)
+async def start_refresh_job(background_tasks: BackgroundTasks) -> JobRunResponse:
+    job = job_registry.create("refresh_snapshots", "Ricostruzione snapshot dallo store operativo.")
+    background_tasks.add_task(_run_job_and_notify, job.job_id, lambda: refresh_operational_snapshots(load_settings()))
+    return job.to_dict()
+
+
+@app.post("/api/jobs/snapshots", response_model=JobRunResponse, status_code=202)
+async def start_snapshot_rebuild_job(background_tasks: BackgroundTasks) -> JobRunResponse:
+    job = job_registry.create("rebuild_dataset", "Normalizzazione MQTT raw e ricostruzione dataset operativo.")
+    background_tasks.add_task(_run_job_and_notify, job.job_id, lambda: rebuild_operational_dataset(load_settings()))
+    return job.to_dict()
+
+
+@app.post("/api/jobs/context", response_model=JobRunResponse, status_code=202)
+async def start_context_job(
+    background_tasks: BackgroundTasks,
+    force: bool = Query(default=False),
+) -> JobRunResponse:
+    job = job_registry.create("prepare_context", "Aggiornamento sensori, zone e layer campus.")
+    background_tasks.add_task(
+        _run_job_and_notify,
+        job.job_id,
+        lambda: prepare_context_layers(load_settings(), force=force),
+        False,
+    )
+    return job.to_dict()
+
+
+@app.post("/api/jobs/enrich", response_model=JobRunResponse, status_code=202)
+async def start_enrichment_job(
+    background_tasks: BackgroundTasks,
+    force: bool = Query(default=True),
+) -> JobRunResponse:
+    job = job_registry.create("refresh_external_sources", "Aggiornamento fonti gratuite e arricchimento dataset operativo.")
+    background_tasks.add_task(_run_job_and_notify, job.job_id, lambda: refresh_external_sources(load_settings(), force=force))
+    return job.to_dict()
+
+
+@app.get("/api/sources")
+def sources() -> dict[str, Any]:
+    return {"sources": read_source_statuses(load_settings())}
+
+
+@app.get("/api/export/{dataset}")
+def export_dataset(
+    dataset: str,
+    format: str = Query(default="csv", pattern="^(csv|json)$"),
+) -> Response:
+    settings = load_settings()
+    if dataset == "observations":
+        frame = read_observations(settings)
+    elif dataset == "raw-messages":
+        frame = read_raw_messages(settings)
+    elif dataset == "sensors":
+        frame = read_sensors(settings)
+    else:
+        raise HTTPException(status_code=404, detail="Unknown export dataset")
+
+    if format == "json":
+        content = frame.where(frame.notna(), None).to_json(orient="records", date_format="iso")
+        return Response(
+            content=content,
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{dataset}.json"'},
+        )
+
+    content = frame.to_csv(index=False)
+    return Response(
+        content=content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{dataset}.csv"'},
+    )
 
 
 @app.post("/api/events/snapshot")

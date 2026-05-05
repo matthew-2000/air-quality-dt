@@ -425,7 +425,7 @@ a:focus-visible,
 }
 
 .provenance-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .panel {
@@ -1009,6 +1009,155 @@ input {
   border-radius: 18px;
   background: rgba(255, 251, 245, 0.9);
   border: 1px solid rgba(67, 84, 69, 0.08);
+}
+
+.data-jobs-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.job-action-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.job-action {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  padding: 13px;
+  border-radius: 14px;
+  border: 1px solid rgba(67, 84, 69, 0.12);
+  background: rgba(255, 251, 245, 0.92);
+  color: var(--text);
+  text-align: left;
+}
+
+.job-action:hover:not(:disabled) {
+  border-color: rgba(79, 110, 77, 0.35);
+  background: #fffdf9;
+}
+
+.job-action:disabled {
+  cursor: wait;
+  opacity: 0.64;
+}
+
+.job-action strong,
+.job-row strong {
+  font-size: 0.9rem;
+}
+
+.job-action span,
+.job-row span,
+.job-empty {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.job-list {
+  display: grid;
+  gap: 9px;
+}
+
+.job-row,
+.source-row,
+.job-empty {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 11px 12px;
+  border-radius: 14px;
+  background: rgba(67, 84, 69, 0.06);
+}
+
+.job-row > div,
+.source-row > div {
+  display: grid;
+  gap: 3px;
+}
+
+.job-row > div:last-child,
+.source-row > div:last-child {
+  justify-items: end;
+  white-space: nowrap;
+}
+
+.job-row.completed {
+  background: rgba(79, 110, 77, 0.1);
+}
+
+.job-row.failed,
+.job-error {
+  color: #9a503b;
+  background: rgba(187, 106, 79, 0.12);
+}
+
+.job-row.running,
+.job-row.queued {
+  background: rgba(155, 122, 67, 0.14);
+}
+
+.job-error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 14px;
+}
+
+.job-error-text {
+  color: #9a503b;
+}
+
+.source-list,
+.export-grid {
+  display: grid;
+  gap: 9px;
+}
+
+.source-row {
+  background: rgba(93, 120, 136, 0.08);
+}
+
+.source-row.live,
+.source-row.available {
+  background: rgba(79, 110, 77, 0.1);
+}
+
+.source-row.failed,
+.source-row.missing {
+  background: rgba(187, 106, 79, 0.12);
+}
+
+.source-row span,
+.source-row small {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.export-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.export-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(67, 84, 69, 0.12);
+  color: var(--text);
+  background: rgba(255, 251, 245, 0.92);
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.export-link:hover {
+  border-color: rgba(79, 110, 77, 0.35);
 }
 
 .analytics-grid {

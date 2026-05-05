@@ -11,10 +11,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from unisa_air_twin.config import load_settings
 from unisa_air_twin.live_sensors import (
-    build_realtime_dataset,
     collect_mqtt_messages,
-    export_operational_artifacts,
 )
+from unisa_air_twin.product_jobs import rebuild_operational_dataset, refresh_operational_snapshots
 
 
 def notify_snapshot_update(url: str | None) -> None:
@@ -48,11 +47,11 @@ def main() -> None:
         print(f"Collected {count:,} MQTT messages.")
         if not args.no_build:
             if args.watch:
-                snapshots = export_operational_artifacts(settings)
-                print(f"Exported {len(snapshots):,} snapshot rows from the operational store.")
+                result = refresh_operational_snapshots(settings)
+                print(f"Exported {result['snapshot_rows']:,} snapshot rows from the operational store.")
             else:
-                snapshots = build_realtime_dataset(settings)
-                print(f"Rebuilt {len(snapshots):,} snapshot rows from raw MQTT history.")
+                result = rebuild_operational_dataset(settings)
+                print(f"Rebuilt {result['snapshot_rows']:,} snapshot rows from raw MQTT history.")
             notify_snapshot_update(args.notify_url)
         if not args.watch:
             break
