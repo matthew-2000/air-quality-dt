@@ -7,7 +7,6 @@ import sys
 import time
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -75,6 +74,8 @@ def main() -> None:
             str(args.mqtt_duration),
             "--interval",
             str(args.mqtt_interval),
+            "--notify-url",
+            f"http://127.0.0.1:{args.api_port}/api/events/snapshot",
         ]
         print("Starting continuous MQTT ingestion")
         processes.append(spawn_process(ingest_command, REPO_ROOT))

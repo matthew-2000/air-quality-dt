@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import asyncio
+import json
+
 from fastapi.testclient import TestClient
 
 import api.main as api_main
 
 
 class FakeTwinService:
+    def refresh(self) -> dict:
+        return self.summary()
+
     def summary(self) -> dict:
         return {
             "project": "UNISA Air Quality Digital Twin",
@@ -88,3 +94,40 @@ def test_analytics_contract(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json()["quality"]["rows"] == 0
+
+
+def test_snapshot_event_notification_contract(monkeypatch) -> None:
+    monkeypatch.setattr(api_main, "get_twin_service", lambda: FakeTwinService())
+    client = TestClient(api_main.app)
+
+    before = api_main.snapshot_events.version
+    response = client.post("/api/events/snapshot")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "notified"
+    assert payload["version"] == before + 1
+
+
+def test_stream_emits_connected_event(monkeypatch) -> None:
+    monkeypatch.setattr(api_main, "get_twin_service", lambda: FakeTwinService())
+
+    class FakeRequest:
+        async def is_disconnected(self) -> bool:
+            return False
+
+    async def collect_first_event() -> str:
+        stream = api_main._summary_stream(FakeRequest())
+        try:
+            return await anext(stream)
+        finally:
+            await stream.aclose()
+
+    chunk = asyncio.run(collect_first_event())
+    lines = [line for line in chunk.splitlines() if line]
+
+    assert "event: connected" in lines
+    data_line = next(line for line in lines if line.startswith("data: "))
+    payload = json.loads(data_line.removeprefix("data: "))
+    assert payload["snapshot_rows"] == 0
+    assert payload["live_feed_status"] == "unknown"

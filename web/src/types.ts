@@ -199,3 +199,17 @@ export type AnalyticsPayload = {
   zone_geojson: FeatureCollection;
   trend: TrendPoint[];
 };
+
+export type StreamStatus = "connecting" | "live" | "retrying" | "unsupported";
+
+export type LiveStreamEvent = {
+  fingerprint: string;
+  latest_timestamp: string | null;
+  latest_received_at?: string | null;
+  snapshot_rows: number;
+  observation_rows: number;
+  raw_message_rows: number;
+  active_sensors: number;
+  live_feed_status?: "live" | "stale" | "unconfigured" | "unknown" | null;
+  generated_at?: string | null;
+};

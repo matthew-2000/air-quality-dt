@@ -63,8 +63,19 @@ Queste metriche non sostituiscono la misura raw. Servono a rendere il Digital Tw
 
 L'endpoint `/api/analytics` restituisce qualita' complessiva, riepilogo zone, GeoJSON colorato delle zone e serie temporale recente per l'inquinante selezionato.
 
+## Realtime Sprint 3
+
+Il terzo sprint completa il passaggio a Digital Twin operativo sul lato runtime:
+
+- l'API espone uno stream SSE che osserva lo stato dello snapshot operativo
+- l'ingestione MQTT notifica l'API dopo ogni export operativo tramite `POST /api/events/snapshot`
+- il frontend React si sottoscrive allo stream e ricarica i pannelli quando riceve una notifica con un nuovo fingerprint del dataset live
+- il refresh manuale resta disponibile per forzare una nuova esportazione degli artifact operativi
+
+Questo modello evita il polling fisso come meccanica primaria della UI e rimuove anche il controllo periodico breve lato stream. La connessione SSE resta aperta con heartbeat lunghi, mentre i cambi reali arrivano da notifiche esplicite dell'ingestione.
+
 ## Limiti
 
 - MQTT non offre da solo uno storico completo.
 - La superficie mappa e' interpolata dai sensori e va letta come supporto operativo.
-- La dashboard oggi usa polling HTTP; non usa ancora SSE o WebSocket.
+- Lo stream live usa SSE e non WebSocket: e' adeguato al flusso server-to-client del cockpit, ma non abilita input realtime bidirezionale.

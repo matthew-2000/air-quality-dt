@@ -28,11 +28,15 @@ La dashboard mostra le misure reali piu' recenti dei sensori UNISA sul campus.
 
 ## Feed live
 
-La dashboard espone chiaramente lo stato del feed:
+La dashboard espone chiaramente lo stato del feed e si riallinea in automatico via stream SSE quando arriva un nuovo snapshot operativo.
+
+Stati feed:
 
 - `live`: il broker MQTT sta alimentando dati recenti
 - `stale`: i dati esistono, ma l'ultima ricezione non e' recente
 - `unconfigured`: mancano variabili MQTT locali
+
+Se il browser non supporta SSE, la UI torna automaticamente a un polling HTTP periodico.
 
 Per aggiornare il feed:
 
@@ -45,6 +49,8 @@ oppure avvia tutto insieme:
 ```bash
 make dev-live MQTT_DURATION=30 MQTT_INTERVAL=5
 ```
+
+In modalita' `dev-live`, ogni ciclo di ingestione notifica automaticamente l'API e la dashboard si aggiorna senza attendere un polling periodico.
 
 ## Limiti
 

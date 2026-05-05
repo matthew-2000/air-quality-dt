@@ -89,6 +89,12 @@ make data-live MQTT_DURATION=180
 make ingest-live MQTT_DURATION=30 MQTT_INTERVAL=5
 ```
 
+Se l'API e' gia' attiva e vuoi notificare lo stream SSE dopo ogni export:
+
+```bash
+UNISA_AQDT_NOTIFY_URL=http://127.0.0.1:8000/api/events/snapshot make ingest-live MQTT_DURATION=30 MQTT_INTERVAL=5
+```
+
 ## Avvio App
 
 ### Modalita' consigliata: API + frontend insieme
@@ -108,7 +114,7 @@ Avvia:
 make dev-live MQTT_DURATION=30 MQTT_INTERVAL=5
 ```
 
-Questa modalita' richiede le variabili MQTT configurate.
+Questa modalita' richiede le variabili MQTT configurate e collega automaticamente l'ingestione allo stream SSE dell'API.
 
 ## Pulizia workspace
 
@@ -178,4 +184,5 @@ Per sviluppo con feed live continuo:
 
 - MQTT non e' uno storico completo: ricevi i messaggi mentre il client e' connesso, piu' eventuali retained.
 - Il backend usa lo store SQLite operativo come sorgente primaria per la dashboard.
-- Il frontend aggiorna lo stato via HTTP; il feed e' near-real-time, non push realtime via WebSocket/SSE.
+- Il frontend riceve aggiornamenti live via SSE dall'API e ricarica summary, mappa, analytics e dettaglio quando l'ingestione notifica un nuovo snapshot operativo.
+- Se `EventSource` non e' disponibile nel browser, il frontend mantiene un fallback a polling HTTP ogni 60 secondi.

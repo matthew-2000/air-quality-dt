@@ -15,11 +15,11 @@ import {
   Trees,
 } from "lucide-react";
 import * as L from "leaflet";
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { CircleMarker, GeoJSON, MapContainer, Polygon, Popup, ScaleControl, TileLayer, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
-import { getJson, requestMessage } from "./api";
+import { getJson, openEventStream, requestMessage } from "./api";
 import {
   ageLabel,
   coverageText,
@@ -37,7 +37,20 @@ import { CoverageBar } from "./components/CoverageBar";
 import { EmptyStatePanel } from "./components/EmptyStatePanel";
 import { SummaryCard } from "./components/SummaryCard";
 import { TwinAnalyticsPanel } from "./components/TwinAnalyticsPanel";
-import type { AnalyticsPayload, FeatureCollection, HistoryPoint, LatLon, LayerVisibility, MapPayload, MapView, SensorDetail, SnapshotSensor, Summary } from "./types";
+import type {
+  AnalyticsPayload,
+  FeatureCollection,
+  HistoryPoint,
+  LatLon,
+  LayerVisibility,
+  LiveStreamEvent,
+  MapPayload,
+  MapView,
+  SensorDetail,
+  SnapshotSensor,
+  StreamStatus,
+  Summary,
+} from "./types";
 
 const layerLabels: Array<{ id: keyof LayerVisibility; label: string; icon: ReactNode }> = [
   { id: "buildings", label: "Edifici", icon: <MapIcon size={14} /> },
@@ -73,6 +86,21 @@ function liveFeedMessage(summary?: Summary | null) {
       : `Feed MQTT fermo: ultima misura ricevuta ${age} minuti fa.`;
   }
   return null;
+}
+
+function streamStatusLabel(status: StreamStatus) {
+  if (status === "live") return "stream SSE attivo";
+  if (status === "retrying") return "riconnessione stream";
+  if (status === "unsupported") return "fallback polling";
+  return "connessione stream";
+}
+
+function parseLiveStreamEvent(event: MessageEvent<string>): LiveStreamEvent | null {
+  try {
+    return JSON.parse(event.data) as LiveStreamEvent;
+  } catch {
+    return null;
+  }
 }
 
 function collectGeoPoints(collection?: FeatureCollection): LatLon[] {
@@ -355,7 +383,9 @@ function App() {
   const [isSensorLoading, setSensorLoading] = useState(false);
   const [isRefreshing, setRefreshing] = useState(false);
   const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
+  const [streamStatus, setStreamStatus] = useState<StreamStatus>("connecting");
   const deferredSearch = useDeferredValue(search);
+  const liveFingerprintRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -381,8 +411,51 @@ function App() {
   }, [refreshTick]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => setRefreshTick((current) => current + 1), 60000);
-    return () => window.clearInterval(timer);
+    if (typeof window === "undefined") {
+      setStreamStatus("unsupported");
+      return undefined;
+    }
+
+    if (!("EventSource" in window)) {
+      setStreamStatus("unsupported");
+      const timer = globalThis.setInterval(() => setRefreshTick((current) => current + 1), 60000);
+      return () => globalThis.clearInterval(timer);
+    }
+
+    setStreamStatus("connecting");
+    const stream = openEventStream("/api/stream");
+    const handleConnected = (event: Event) => {
+      const payload = parseLiveStreamEvent(event as MessageEvent<string>);
+      if (!payload) return;
+      liveFingerprintRef.current = payload.fingerprint;
+      setStreamStatus("live");
+      setError(null);
+    };
+    const handleSnapshotUpdate = (event: Event) => {
+      const payload = parseLiveStreamEvent(event as MessageEvent<string>);
+      if (!payload) return;
+      setStreamStatus("live");
+      if (payload.fingerprint === liveFingerprintRef.current) return;
+      liveFingerprintRef.current = payload.fingerprint;
+      setRefreshTick((current) => current + 1);
+    };
+    const handleStreamError = () => {
+      setStreamStatus("retrying");
+    };
+
+    stream.addEventListener("connected", handleConnected);
+    stream.addEventListener("snapshot_update", handleSnapshotUpdate);
+    stream.addEventListener("stream_error", handleStreamError);
+    stream.onerror = () => {
+      setStreamStatus("retrying");
+    };
+
+    return () => {
+      stream.removeEventListener("connected", handleConnected);
+      stream.removeEventListener("snapshot_update", handleSnapshotUpdate);
+      stream.removeEventListener("stream_error", handleStreamError);
+      stream.close();
+    };
   }, []);
 
   useEffect(() => {
@@ -595,6 +668,7 @@ function App() {
             <span>{summary?.source ?? "UNISA AQDT"}</span>
             <span>{summary ? formatTime(summary.latest_received_at) : "Aggiornamento..."}</span>
             <span>{summary?.campus.name ?? "Campus Fisciano"}</span>
+            <span>{streamStatusLabel(streamStatus)}</span>
             {lastLoadedAt ? <span>UI {formatTime(lastLoadedAt.toISOString())}</span> : null}
           </div>
         </header>
