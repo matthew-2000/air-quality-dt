@@ -7,8 +7,7 @@ Oggi il prodotto attivo e supportato e' questo:
 - frontend React in `web/`
 - API FastAPI in `api/`
 - job dati, ingestione MQTT e store operativo in `src/unisa_air_twin/`
-
-Il vecchio ramo Streamlit e la simulazione scenario non fanno piu' parte dell'app corrente.
+- motore what-if non distruttivo, forecast breve termine e decision support via dashboard
 
 ## Requisiti
 
@@ -66,6 +65,11 @@ Il flusso prodotto non richiede comandi terminale per l'utente finale. La dashbo
 - `GET /api/jobs`: mostra stato, errori e risultato delle operazioni avviate.
 - `GET /api/sources`: mostra salute, cache e provenance delle fonti dati.
 - `GET /api/export/{observations|sensors|raw-messages}?format=csv|json`: scarica dati disponibili.
+- `GET /api/forecast`: previsioni operative 30/60/180 minuti.
+- `POST /api/scenarios/run`: crea un run what-if salvato senza modificare osservazioni reali.
+- `GET /api/scenarios/runs`: storico run salvati.
+- `GET /api/decision-support`: alert, spiegazioni e "cosa fare ora".
+- `GET /api/ops/health`: stato API, DB, MQTT, jobs, stream, export e backup.
 
 Gli script in `scripts/` restano utility di sviluppo e compatibilita', ma non sono il percorso utente primario.
 
@@ -82,6 +86,22 @@ Le risposte Open-Meteo sono salvate in `data/raw/external/` e riusate come cache
 
 ## Avvio App
 
+### Deploy demo/produzione locale
+
+```bash
+make deploy
+```
+
+Equivalente:
+
+```bash
+docker compose up --build
+```
+
+Avvia API su `http://127.0.0.1:8000` e dashboard su `http://127.0.0.1:5173`, con healthcheck e restart policy.
+
+L'API avvia automaticamente ingest MQTT se `.env.local` contiene le credenziali. Ogni ciclo ascolta MQTT, aggiorna store operativo, ricostruisce snapshot e notifica la dashboard via SSE.
+
 ### Modalita' consigliata: API + frontend insieme
 
 ```bash
@@ -93,11 +113,7 @@ Avvia:
 - API su `http://127.0.0.1:8000`
 - frontend su `http://127.0.0.1:5173`
 
-Per sviluppo con ingestione continua puoi passare argomenti al runner:
-
-```bash
-make dev DEV_ARGS="--with-ingest --mqtt-duration 30 --mqtt-interval 5"
-```
+Anche in sviluppo l'ingest automatico parte dentro API quando MQTT e' configurato.
 
 ## Pulizia workspace
 
@@ -134,13 +150,10 @@ Per preparare una macchina nuova:
 1. clona il repository;
 2. esegui `make bootstrap`;
 3. crea `.env.local` da `.env.example`;
-4. avvia `make dev`;
-5. usa **Gestione dati** nella dashboard per preparare contesto, dataset e snapshot.
+4. inserisci password MQTT;
+5. avvia `make dev` oppure `make deploy`.
 
-Per sviluppo con feed live continuo:
-
-1. verifica `.env.local`;
-2. esegui `make dev DEV_ARGS="--with-ingest --mqtt-duration 30 --mqtt-interval 5"`.
+La dashboard resta il centro operativo: i job manuali servono solo per refresh forzati o riparazioni, non per avvio ordinario.
 
 ## Output principali
 
@@ -154,6 +167,7 @@ Per sviluppo con feed live continuo:
 ## Note operative
 
 - MQTT non e' uno storico completo: ricevi i messaggi mentre il client e' connesso, piu' eventuali retained.
+- Ingest MQTT automatico: `UNISA_AQDT_AUTO_INGEST=true`, durata ciclo `UNISA_AQDT_AUTO_INGEST_DURATION`, pausa `UNISA_AQDT_AUTO_INGEST_INTERVAL`.
 - Il backend usa lo store SQLite operativo come sorgente primaria per la dashboard.
 - Le fonti esterne gratuite sono cache-first: un errore rete non blocca la dashboard se esiste cache locale.
 - Gli export CSV/JSON sono generati dall'API a partire dallo store operativo.

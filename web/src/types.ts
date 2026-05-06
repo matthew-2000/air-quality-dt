@@ -250,3 +250,61 @@ export type DataSourceStatus = {
 export type DataSourceList = {
   sources: DataSourceStatus[];
 };
+
+export type ForecastWindow = {
+  minutes: number;
+  expected_value: number;
+  lower: number;
+  upper: number;
+  trend: string;
+  risk: string;
+  confidence: number;
+};
+
+export type ForecastPayload = {
+  pollutant: string;
+  timestamp?: string | null;
+  windows: ForecastWindow[];
+  critical_zones: Array<Record<string, unknown> | string>;
+  method: string;
+};
+
+export type ScenarioRun = {
+  run_id: string;
+  name: string;
+  scenario_type: string;
+  pollutant: string;
+  intensity: number;
+  created_at: string;
+  baseline_timestamp?: string | null;
+  parameters: Record<string, unknown>;
+  output: {
+    baseline_mean?: number | null;
+    scenario_mean?: number | null;
+    delta_mean?: number | null;
+    confidence?: number | null;
+    risk?: string;
+    zone_deltas?: Array<{ zone: string; zone_name: string; baseline?: number | null; scenario?: number | null; delta?: number | null }>;
+    drivers?: string[];
+    areas_to_watch?: string[];
+    sensors_to_check?: string[];
+    method_notes?: string;
+  };
+};
+
+export type ScenarioRunList = {
+  runs: ScenarioRun[];
+};
+
+export type DecisionSupportPayload = {
+  risk_level: string;
+  what_to_do_now: string[];
+  alerts: Array<{ level: string; title: string; detail: string }>;
+  suggested_sensor_placement: string[];
+  explanations: string[];
+};
+
+export type OperationalHealthPayload = {
+  services: Array<{ name: string; status: string; detail?: string | null }>;
+  backup: { status: string; retention_days: number; restore_test: string; last_backup?: string | null };
+};

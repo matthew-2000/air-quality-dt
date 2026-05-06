@@ -12,6 +12,14 @@ export async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json();
 }
 
+export async function postJson<T>(path: string, body?: unknown): Promise<T> {
+  return getJson<T>(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
 export function openEventStream(path: string): EventSource {
   return new EventSource(apiUrl(path));
 }

@@ -63,6 +63,46 @@ class FakeTwinService:
             "trend": [],
         }
 
+    def load(self) -> dict:
+        return {
+            "observations": pd.DataFrame(
+                [
+                    {
+                        "timestamp": "2026-01-01T10:00:00",
+                        "sensor_id": "A",
+                        "sensor_name": "Sensore A",
+                        "pollutant": "pm10",
+                        "estimated_value": 10.0,
+                    },
+                    {
+                        "timestamp": "2026-01-01T10:01:00",
+                        "sensor_id": "A",
+                        "sensor_name": "Sensore A",
+                        "pollutant": "pm10",
+                        "estimated_value": 12.0,
+                    },
+                ]
+            ),
+            "layers": {"zones": {"type": "FeatureCollection", "features": []}},
+        }
+
+    def snapshot(self, pollutant: str, timestamp: str) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {
+                    "timestamp": timestamp,
+                    "sensor_id": "A",
+                    "sensor_name": "Sensore A",
+                    "pollutant": pollutant,
+                    "estimated_value": 12.0,
+                    "reading_age_seconds": 30,
+                    "coverage_ratio": 1.0,
+                    "lat": 40.771,
+                    "lon": 14.79,
+                }
+            ]
+        )
+
 
 def test_summary_contract_exposes_raw_and_observation_counts(monkeypatch) -> None:
     monkeypatch.setattr(api_main, "get_twin_service", lambda: FakeTwinService())
@@ -174,3 +214,46 @@ def test_sources_contract(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json()["sources"][0]["source_id"] == "osm_green"
+
+
+def test_forecast_contract(monkeypatch) -> None:
+    monkeypatch.setattr(api_main, "get_twin_service", lambda: FakeTwinService())
+    client = TestClient(api_main.app)
+
+    response = client.get("/api/forecast?pollutant=pm10&timestamp=2026-01-01T10:01:00")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [window["minutes"] for window in payload["windows"]] == [30, 60, 180]
+    assert payload["method"]
+
+
+def test_scenario_run_contract(monkeypatch) -> None:
+    monkeypatch.setattr(api_main, "get_twin_service", lambda: FakeTwinService())
+    client = TestClient(api_main.app)
+
+    response = client.post(
+        "/api/scenarios/run",
+        json={"scenario_type": "traffic_increase", "pollutant": "pm10", "timestamp": "2026-01-01T10:01:00", "intensity": 1},
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["output"]["delta_mean"] > 0
+
+    runs = client.get("/api/scenarios/runs")
+    assert runs.status_code == 200
+    assert runs.json()["runs"]
+
+
+def test_decision_support_and_health_contract(monkeypatch) -> None:
+    monkeypatch.setattr(api_main, "get_twin_service", lambda: FakeTwinService())
+    client = TestClient(api_main.app)
+
+    decision = client.get("/api/decision-support?pollutant=pm10&timestamp=2026-01-01T10:01:00")
+    health = client.get("/api/ops/health")
+
+    assert decision.status_code == 200
+    assert decision.json()["what_to_do_now"]
+    assert health.status_code == 200
+    assert health.json()["services"][0]["name"] == "API"

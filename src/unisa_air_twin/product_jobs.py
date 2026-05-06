@@ -11,6 +11,7 @@ from unisa_air_twin.config import Settings
 from unisa_air_twin.external_sources import fetch_external_context
 from unisa_air_twin.live_sensors import (
     build_realtime_dataset,
+    collect_mqtt_messages,
     export_operational_artifacts,
     write_real_sensor_geojson,
 )
@@ -107,5 +108,22 @@ def refresh_external_sources(settings: Settings, force: bool = True) -> dict[str
     snapshots = build_realtime_dataset(settings)
     return {
         "sources": payload["sources"],
+        "snapshot_rows": int(len(snapshots)),
+    }
+
+
+def collect_live_and_refresh(
+    settings: Settings,
+    duration_seconds: int = 30,
+    max_messages: int | None = None,
+) -> dict[str, Any]:
+    messages = collect_mqtt_messages(
+        settings,
+        duration_seconds=duration_seconds,
+        max_messages=max_messages,
+    )
+    snapshots = export_operational_artifacts(settings)
+    return {
+        "mqtt_messages": int(messages),
         "snapshot_rows": int(len(snapshots)),
     }

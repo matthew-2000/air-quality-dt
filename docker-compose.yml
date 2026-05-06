@@ -1,0 +1,38 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    env_file:
+      - path: .env.example
+        required: true
+      - path: .env.local
+        required: false
+    environment:
+      UNISA_AQDT_AUTO_INGEST: "true"
+      UNISA_AQDT_AUTO_INGEST_DURATION: "30"
+      UNISA_AQDT_AUTO_INGEST_INTERVAL: "10"
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config:ro
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        VITE_API_BASE: http://localhost:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "5173:5173"
+    restart: unless-stopped

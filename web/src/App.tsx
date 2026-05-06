@@ -38,6 +38,7 @@ import { DataJobsPanel } from "./components/DataJobsPanel";
 import { EmptyStatePanel } from "./components/EmptyStatePanel";
 import { SummaryCard } from "./components/SummaryCard";
 import { TwinAnalyticsPanel } from "./components/TwinAnalyticsPanel";
+import { ProductWorkflowPanels } from "./components/ProductWorkflowPanels";
 import type {
   AnalyticsPayload,
   FeatureCollection,
@@ -635,11 +636,13 @@ function App() {
         </div>
 
         <nav className="rail-nav" aria-label="Sezioni dashboard">
-          <a href="#monitor">Monitor</a>
-          <a href="#analytics">Twin</a>
-          <a href="#sensors">Sensori</a>
-          <a href="#history">Storico</a>
-          <a href="#provenance">Dati</a>
+          <a href="#monitor">Overview</a>
+          <a href="#map">Map</a>
+          <a href="#scenarios">Scenari</a>
+          <a href="#sensors">Sensor Explorer</a>
+          <a href="#insights">Insights</a>
+          <a href="#data-center">Data Center</a>
+          <a href="#settings">Settings</a>
         </nav>
 
         <div className="rail-meta-grid">
@@ -692,6 +695,7 @@ function App() {
         {!hasObservations && summary ? (
           <>
             <EmptyStatePanel summary={summary} observationRows={observationRows} />
+            <ProductWorkflowPanels pollutant={pollutant} timestamp={timestamp} summary={summary} />
             <section className="provenance-grid" id="provenance">
               <DataJobsPanel onDataChanged={handleDataChanged} />
             </section>
@@ -790,7 +794,7 @@ function App() {
             </div>
           </article>
 
-          <article className="panel map-panel">
+          <article className="panel map-panel" id="map">
             <div className="panel-head">
               <div>
                 <span>Mappa campus</span>
@@ -974,6 +978,8 @@ function App() {
 
         <TwinAnalyticsPanel analytics={analytics} />
 
+        <ProductWorkflowPanels pollutant={pollutant} timestamp={timestamp} summary={summary} />
+
         <section className="panel table-panel" id="sensors">
           <div className="panel-head">
             <div>
@@ -1116,9 +1122,7 @@ function App() {
               <i />
             </div>
             {error ? (
-              <p>
-                {error}. Verifica che l'API sia attiva con <code>make api</code> e che il frontend sia avviato con <code>make web</code>.
-              </p>
+              <p>{error}. Riprova l'aggiornamento dalla dashboard oppure passa in modalità demo con dati simulati.</p>
             ) : (
               <p>{loadingCopy}</p>
             )}

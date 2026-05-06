@@ -3,7 +3,7 @@ SYSTEM_PYTHON ?= python3
 PYTHON ?= $(VENV)/bin/python
 DEV_ARGS ?=
 
-.PHONY: venv install install-web bootstrap dev api web build test lint clean
+.PHONY: venv install install-web bootstrap dev api web build test lint deploy clean
 
 venv:
 	@if [ ! -x "$(PYTHON)" ]; then $(SYSTEM_PYTHON) -m venv $(VENV); fi
@@ -34,6 +34,9 @@ test:
 
 lint:
 	$(PYTHON) -m ruff check .
+
+deploy:
+	docker compose up --build
 
 clean:
 	rm -rf api/__pycache__ app/__pycache__ scripts/__pycache__ src/unisa_air_twin/__pycache__ tests/__pycache__ .pytest_cache .ruff_cache cache web/dist

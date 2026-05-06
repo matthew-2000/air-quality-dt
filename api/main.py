@@ -1,27 +1,43 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
 import anyio
+import pandas as pd
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 
+from api.autostart import auto_ingest_loop
 from api.events import snapshot_events
 from api.streaming import summary_stream
 from unisa_air_twin.api_schemas import (
     AnalyticsResponse,
+    DecisionSupportResponse,
+    ForecastResponse,
     JobListResponse,
     JobRunResponse,
     MapPayloadResponse,
+    OperationalHealthResponse,
     RefreshResponse,
+    ScenarioRunListResponse,
+    ScenarioRunRequest,
+    ScenarioRunResponse,
     SensorDetailResponse,
     SummaryResponse,
     TimeseriesResponse,
     TimestampsResponse,
 )
 from unisa_air_twin.config import load_settings
+from unisa_air_twin.decision_engine import (
+    decision_payload,
+    forecast_payload,
+    health_payload,
+    run_scenario,
+    scenario_store,
+)
 from unisa_air_twin.external_sources import read_source_statuses
 from unisa_air_twin.operational_store import read_observations, read_raw_messages, read_sensors
 from unisa_air_twin.product_jobs import (
@@ -33,10 +49,21 @@ from unisa_air_twin.product_jobs import (
 )
 from unisa_air_twin.ui_data import get_twin_service
 
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    settings = load_settings()
+    async with anyio.create_task_group() as task_group:
+        task_group.start_soon(auto_ingest_loop, settings, get_twin_service, snapshot_events)
+        yield
+        task_group.cancel_scope.cancel()
+
+
 app = FastAPI(
     title="UNISA Air Quality Digital Twin API",
     version="0.1.0",
     description="Operational API for real-only UNISA sensor snapshots, raw histories, and campus context layers.",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -222,3 +249,68 @@ def sensor_detail(sensor_id: str = Query(...), timestamp: str = Query(...)) -> S
 @app.get("/api/analytics", response_model=AnalyticsResponse)
 def analytics(pollutant: str = Query(...), timestamp: str | None = Query(default=None)) -> AnalyticsResponse:
     return get_twin_service().analytics(pollutant, timestamp)
+
+
+def _resolve_timestamp(pollutant: str, timestamp: str | None) -> str | None:
+    if timestamp:
+        return timestamp
+    timestamps = get_twin_service().timestamps(pollutant)
+    return timestamps[-1] if timestamps else None
+
+
+@app.get("/api/forecast", response_model=ForecastResponse)
+def forecast(pollutant: str = Query(...), timestamp: str | None = Query(default=None)) -> ForecastResponse:
+    service = get_twin_service()
+    selected_timestamp = _resolve_timestamp(pollutant, timestamp)
+    snapshot = service.snapshot(pollutant, selected_timestamp) if selected_timestamp else pd.DataFrame()
+    data = service.load()
+    payload = forecast_payload(data["observations"], snapshot, pollutant, selected_timestamp)
+    analytics_payload = service.analytics(pollutant, selected_timestamp)
+    zones = analytics_payload.get("zone_summary", [])
+    payload["critical_zones"] = [
+        {"zone": row.get("zone"), "zone_name": row.get("zone_name"), "mean_value": row.get("mean_value")}
+        for row in zones[:3]
+    ]
+    return payload
+
+
+@app.post("/api/scenarios/run", response_model=ScenarioRunResponse, status_code=201)
+def scenario_run(request: ScenarioRunRequest) -> ScenarioRunResponse:
+    service = get_twin_service()
+    selected_timestamp = _resolve_timestamp(request.pollutant, request.timestamp)
+    if not selected_timestamp:
+        raise HTTPException(status_code=422, detail="No baseline timestamp available for scenario")
+    snapshot = service.snapshot(request.pollutant, selected_timestamp)
+    data = service.load()
+    return run_scenario(
+        snapshot,
+        data["layers"]["zones"],
+        request.pollutant,
+        selected_timestamp,
+        request.scenario_type,
+        request.intensity,
+        request.name,
+        request.parameters,
+    )
+
+
+@app.get("/api/scenarios/runs", response_model=ScenarioRunListResponse)
+def scenario_runs(limit: Annotated[int, Query(ge=1, le=50)] = 20) -> ScenarioRunListResponse:
+    return {"runs": scenario_store.list(limit=limit)}
+
+
+@app.get("/api/decision-support", response_model=DecisionSupportResponse)
+def decision_support(pollutant: str = Query(...), timestamp: str | None = Query(default=None)) -> DecisionSupportResponse:
+    service = get_twin_service()
+    selected_timestamp = _resolve_timestamp(pollutant, timestamp)
+    summary_payload = service.summary()
+    analytics_response = service.analytics(pollutant, selected_timestamp)
+    snapshot = service.snapshot(pollutant, selected_timestamp) if selected_timestamp else pd.DataFrame()
+    data = service.load()
+    forecast_response = forecast_payload(data["observations"], snapshot, pollutant, selected_timestamp)
+    return decision_payload(summary_payload, analytics_response, forecast_response)
+
+
+@app.get("/api/ops/health", response_model=OperationalHealthResponse)
+def ops_health() -> OperationalHealthResponse:
+    return health_payload(get_twin_service().summary(), [job.to_dict() for job in job_registry.list(limit=50)])

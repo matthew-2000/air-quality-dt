@@ -1,0 +1,82 @@
+# Operations
+
+## Deploy
+
+Avvio locale deploy-ready:
+
+```bash
+make deploy
+```
+
+Equivalente:
+
+```bash
+docker compose up --build
+```
+
+Servizi:
+
+- API FastAPI: `http://127.0.0.1:8000`
+- Dashboard React: `http://127.0.0.1:5173`
+
+Compose abilita healthcheck e `restart: unless-stopped`.
+
+All'avvio API parte anche ingest MQTT automatico se le variabili `UNISA_MQTT_*` sono complete. Non serve piu' eseguire comandi dati separati per il flusso ordinario.
+
+## Configurazione
+
+Variabili MQTT in `.env.local` o ambiente:
+
+- `UNISA_MQTT_HOST`
+- `UNISA_MQTT_PORT`
+- `UNISA_MQTT_USERNAME`
+- `UNISA_MQTT_PASSWORD`
+- `UNISA_MQTT_TOPIC`
+
+La dashboard mostra se MQTT e' configurato e segnala feed stale o non configurato.
+
+Controlli ingest:
+
+- `UNISA_AQDT_AUTO_INGEST=true|false`
+- `UNISA_AQDT_AUTO_INGEST_DURATION=30`
+- `UNISA_AQDT_AUTO_INGEST_INTERVAL=10`
+
+Ogni ciclo:
+
+1. ascolta MQTT;
+2. salva raw messages e osservazioni normalizzate;
+3. ricostruisce snapshot operativi;
+4. aggiorna summary/dashboard via SSE.
+
+## Health
+
+Endpoint: `GET /api/ops/health`
+
+Controlla:
+
+- API;
+- DB operativo;
+- MQTT;
+- jobs;
+- stream SSE;
+- export;
+- backup/retention.
+
+La stessa informazione appare nella sezione **Health dashboard**.
+
+## Backup e retention
+
+Il volume `./data:/app/data` contiene store operativo, raw e processed artifacts. Backup minimo:
+
+1. snapshot periodico della directory `data/`;
+2. retention coerente con setting dashboard;
+3. restore test su ambiente non produttivo;
+4. verifica `GET /api/health` e apertura dashboard.
+
+## Troubleshooting
+
+- Feed live assente: controlla stato MQTT nella dashboard, poi variabili ambiente.
+- Dati vecchi: verifica job `auto_ingest_mqtt`; poi usa **Aggiorna snapshot** o **Ricostruisci dataset** solo come recupero manuale.
+- Fonti esterne fallite: usa **Arricchisci fonti**; se rete assente, cache esistente resta utilizzabile.
+- Export vuoto: verifica osservazioni e raw messages in **Data Center**.
+- Scenario non eseguibile: serve almeno un timestamp baseline disponibile.
