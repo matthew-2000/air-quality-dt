@@ -51,6 +51,11 @@ def _snapshot_settings(settings: Settings) -> tuple[int, int]:
     return bucket_minutes, freshness_minutes
 
 
+def _timestamp_guard_settings(settings: Settings) -> int:
+    config = settings.live_sensors.get("timestamps", {})
+    return max(0, int(config.get("max_future_skew_seconds", 120)))
+
+
 def _configured_path(settings: Settings, key: str) -> Path:
     raw_config = settings.live_sensors.get("raw", {})
     value = raw_config.get(key)
@@ -222,6 +227,14 @@ def _normalize_payload_record(
     measured_at = _local_timestamp(payload.get("timestamp"), settings)
     if pd.isna(measured_at):
         measured_at = received_at
+    max_future_skew_seconds = _timestamp_guard_settings(settings)
+    if (
+        pd.notna(received_at)
+        and pd.notna(measured_at)
+        and max_future_skew_seconds >= 0
+        and measured_at > received_at + pd.Timedelta(seconds=max_future_skew_seconds)
+    ):
+        measured_at = received_at
     if pd.isna(measured_at):
         return []
     lat = sensor.get("lat")
@@ -310,6 +323,10 @@ def normalize_mqtt_observations(settings: Settings) -> pd.DataFrame:
     observations = pd.DataFrame(rows)
     if not observations.empty:
         observations = observations.sort_values(["timestamp", "sensor_id", "pollutant"]).reset_index(drop=True)
+        observations = observations.drop_duplicates(
+            subset=["timestamp", "received_at", "sensor_id", "pollutant"],
+            keep="last",
+        ).reset_index(drop=True)
     return observations
 
 

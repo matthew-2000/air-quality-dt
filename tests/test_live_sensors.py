@@ -8,6 +8,7 @@ import pandas as pd
 from unisa_air_twin.config import load_dotenv, load_settings
 from unisa_air_twin.live_sensors import (
     _local_timestamp,
+    _normalize_payload_record,
     build_operational_snapshots,
     build_realtime_dataset,
     load_sensor_catalog,
@@ -178,3 +179,25 @@ def test_local_timestamp_keeps_naive_local_strings_in_project_timezone() -> None
 
     assert _local_timestamp("2026-05-04T14:51:33.973783", settings) == pd.Timestamp("2026-05-04 14:51:33")
     assert _local_timestamp(1777899092, settings) == pd.Timestamp("2026-05-04 14:51:32")
+
+
+def test_normalize_payload_clamps_future_sensor_timestamp_to_received_at() -> None:
+    settings = load_settings()
+    metadata = {"ITTEST123456": {"name": "Sensore Test", "lat": 40.771, "lon": 14.79, "zone": "campus"}}
+    rows = _normalize_payload_record(
+        settings,
+        {
+            "ID": "ITTEST123456",
+            "timestamp": "2026-05-06T11:36:32",
+            "pm10": 7.1,
+            "pm2_5": 4.8,
+            "pm1": 4.4,
+        },
+        "ITTEST123456",
+        "2026-05-06T10:37:22",
+        metadata,
+        "2026-05-06T10:37:22",
+    )
+
+    assert rows
+    assert {row["timestamp"] for row in rows} == {pd.Timestamp("2026-05-06 10:37:22")}

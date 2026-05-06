@@ -293,10 +293,12 @@ class TwinDataService:
             sensor_id = str(sensor.get("sensor_id"))
             latest = latest_by_sensor.loc[sensor_id] if sensor_id in latest_by_sensor.index else None
             latest_received = latest.get("received_at") if latest is not None else None
+            latest_measured = latest.get("timestamp") if latest is not None else None
             age_seconds = None
-            if latest_received is not None and pd.notna(latest_received):
+            freshness_reference = latest_measured if latest_measured is not None and pd.notna(latest_measured) else latest_received
+            if freshness_reference is not None and pd.notna(freshness_reference):
                 now = pd.Timestamp.now(tz=self.settings.project.get("timezone", "Europe/Rome")).tz_localize(None)
-                age_seconds = max((now - pd.Timestamp(latest_received)).total_seconds(), 0)
+                age_seconds = max((now - pd.Timestamp(freshness_reference)).total_seconds(), 0)
             rows.append(
                 {
                     "sensor_id": sensor_id,
@@ -305,8 +307,8 @@ class TwinDataService:
                     "latest_received_at": pd.Timestamp(latest_received).strftime("%Y-%m-%dT%H:%M:%S")
                     if latest_received is not None and pd.notna(latest_received)
                     else None,
-                    "latest_measured_at": pd.Timestamp(latest.get("timestamp")).strftime("%Y-%m-%dT%H:%M:%S")
-                    if latest is not None and pd.notna(latest.get("timestamp"))
+                    "latest_measured_at": pd.Timestamp(latest_measured).strftime("%Y-%m-%dT%H:%M:%S")
+                    if latest_measured is not None and pd.notna(latest_measured)
                     else None,
                     "pollutants": pollutants_by_sensor.get(sensor_id, []),
                 }

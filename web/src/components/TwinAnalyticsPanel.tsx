@@ -1,6 +1,7 @@
 import { Activity, Gauge, MapPin, ShieldCheck } from "lucide-react";
 
-import { formatNumber, formatPercent, formatTime, pathForValues, pollutantLabels } from "../format";
+import { formatNumber, formatPercent, formatTime, pollutantLabels } from "../format";
+import { AnalyticsTrendChart } from "./Charts";
 import type { AnalyticsPayload } from "../types";
 
 function flagLabel(flag: string) {
@@ -19,11 +20,7 @@ function flagLabel(flag: string) {
 
 function AnalyticsTrend({ analytics }: { analytics?: AnalyticsPayload }) {
   const points = analytics?.trend ?? [];
-  if (!points.length) {
-    return <div className="chart-empty">Trend non disponibile per lo storico corrente.</div>;
-  }
-  const values = points.map((point) => point.mean_value);
-  const latest = values.at(-1);
+  const latest = points.at(-1)?.mean_value;
   return (
     <div className="chart-shell compact">
       <div className="chart-summary">
@@ -36,21 +33,7 @@ function AnalyticsTrend({ analytics }: { analytics?: AnalyticsPayload }) {
           <strong>{points.length}</strong>
         </div>
       </div>
-      <svg
-        viewBox="0 0 100 100"
-        className="trend-chart analytics-trend"
-        role="img"
-        aria-label={`Trend ${pollutantLabels[analytics?.pollutant ?? ""] ?? analytics?.pollutant ?? ""}`}
-      >
-        <line x1="7" y1="22" x2="93" y2="22" className="chart-grid-line" />
-        <line x1="7" y1="53" x2="93" y2="53" className="chart-grid-line" />
-        <line x1="7" y1="84" x2="93" y2="84" className="chart-grid-line" />
-        <path d={pathForValues(values)} className="trend-line" />
-      </svg>
-      <div className="chart-axis">
-        <span>{formatTime(points[0]?.timestamp)}</span>
-        <span>{formatTime(points.at(-1)?.timestamp)}</span>
-      </div>
+      <AnalyticsTrendChart points={points} />
     </div>
   );
 }

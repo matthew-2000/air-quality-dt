@@ -27,22 +27,23 @@ import {
   formatNumber,
   formatPercent,
   formatTime,
-  pathForValues,
   pollutantLabels,
   pollutantUnits,
   statusLabel,
   statusTone,
 } from "./format";
+import { SensorHistoryChart } from "./components/Charts";
 import { CoverageBar } from "./components/CoverageBar";
 import { DataJobsPanel } from "./components/DataJobsPanel";
 import { EmptyStatePanel } from "./components/EmptyStatePanel";
 import { SummaryCard } from "./components/SummaryCard";
 import { TwinAnalyticsPanel } from "./components/TwinAnalyticsPanel";
 import { ProductWorkflowPanels } from "./components/ProductWorkflowPanels";
+import { pageItems } from "./pages/pageConfig";
+import type { PageId } from "./pages/pageConfig";
 import type {
   AnalyticsPayload,
   FeatureCollection,
-  HistoryPoint,
   LatLon,
   LayerVisibility,
   LiveStreamEvent,
@@ -305,66 +306,6 @@ function MapLegend({
   );
 }
 
-function TrendChart({ points, pollutant }: { points: HistoryPoint[]; pollutant: string }) {
-  if (!points.length) {
-    return <div className="chart-empty">Storico non disponibile per {pollutantLabels[pollutant] ?? pollutant.toUpperCase()}.</div>;
-  }
-  const values = points.map((point) => point.estimated_value);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const latest = values.at(-1);
-  const unit = pollutantUnits[pollutant] ?? "";
-  const coordinates = values.map((value, index) => {
-    const span = max - min || 1;
-    return {
-      x: 7 + (index / Math.max(values.length - 1, 1)) * 86,
-      y: 84 - ((value - min) / span) * 62,
-      value,
-      timestamp: points[index]?.timestamp,
-    };
-  });
-  return (
-    <div className="chart-shell">
-      <div className="chart-summary">
-        <div>
-          <span>Ultimo valore</span>
-          <strong>
-            {formatNumber(latest, 2)} {unit}
-          </strong>
-        </div>
-        <div>
-          <span>Intervallo</span>
-          <strong>
-            {formatNumber(min, 2)} - {formatNumber(max, 2)}
-          </strong>
-        </div>
-      </div>
-      <svg
-        viewBox="0 0 100 100"
-        className="trend-chart"
-        role="img"
-        aria-label={`Storico ${pollutantLabels[pollutant] ?? pollutant.toUpperCase()}, minimo ${formatNumber(min, 2)}, massimo ${formatNumber(max, 2)}`}
-      >
-        <line x1="7" y1="22" x2="93" y2="22" className="chart-grid-line" />
-        <line x1="7" y1="53" x2="93" y2="53" className="chart-grid-line" />
-        <line x1="7" y1="84" x2="93" y2="84" className="chart-grid-line" />
-        <path d={pathForValues(values)} className="trend-line" />
-        {coordinates.map((point, index) => (
-          <circle key={`${point.timestamp}-${index}`} cx={point.x} cy={point.y} r={index === coordinates.length - 1 ? 2.2 : 1.4} className="trend-point">
-            <title>
-              {formatTime(point.timestamp)}: {formatNumber(point.value, 2)} {unit}
-            </title>
-          </circle>
-        ))}
-      </svg>
-      <div className="chart-axis">
-        <span>{formatTime(points[0]?.timestamp)}</span>
-        <span>{formatTime(points.at(-1)?.timestamp)}</span>
-      </div>
-    </div>
-  );
-}
-
 function App() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [timestamps, setTimestamps] = useState<string[]>([]);
@@ -376,6 +317,7 @@ function App() {
   const [selectedSensorId, setSelectedSensorId] = useState<string | null>(null);
   const [layerVisibility, setLayerVisibility] = useState<LayerVisibility>(defaultLayers);
   const [mapView, setMapView] = useState<MapView>("surface");
+  const [activePage, setActivePage] = useState<PageId>("overview");
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
@@ -635,14 +577,19 @@ function App() {
           </button>
         </div>
 
-        <nav className="rail-nav" aria-label="Sezioni dashboard">
-          <a href="#monitor">Overview</a>
-          <a href="#map">Map</a>
-          <a href="#scenarios">Scenari</a>
-          <a href="#sensors">Sensor Explorer</a>
-          <a href="#insights">Insights</a>
-          <a href="#data-center">Data Center</a>
-          <a href="#settings">Settings</a>
+        <nav className="rail-nav page-nav" aria-label="Sezioni dashboard">
+          {pageItems.map((item) => (
+            <button
+              type="button"
+              key={item.id}
+              className={activePage === item.id ? "active" : ""}
+              aria-current={activePage === item.id ? "page" : undefined}
+              onClick={() => setActivePage(item.id)}
+            >
+              <strong>{item.label}</strong>
+              <span>{item.helper}</span>
+            </button>
+          ))}
         </nav>
 
         <div className="rail-meta-grid">
@@ -669,8 +616,9 @@ function App() {
       <section className="workspace">
         <header className="hero" id="monitor">
           <div className="hero-copy">
-            <h1>Cabina operativa sensori UNISA</h1>
-            <p>Monitora il campus con snapshot aggiornati, superficie di qualità dell'aria, dettaglio sensore e storico recente.</p>
+            <span className="page-kicker">{pageItems.find((item) => item.id === activePage)?.label}</span>
+            <h1>Air Quality Operations</h1>
+            <p>Stato campus, rischio corrente, dati live e azioni consigliate in una vista leggibile.</p>
           </div>
           <div className="hero-meta">
             <span>{summary?.source ?? "UNISA AQDT"}</span>
@@ -702,7 +650,7 @@ function App() {
           </>
         ) : (
           <>
-        <section className="summary-grid">
+        {activePage === "overview" ? <section className="summary-grid">
           <SummaryCard
             title="Sensori attivi"
             value={coverageText(summary?.active_sensors, summary?.capable_sensors)}
@@ -733,11 +681,11 @@ function App() {
             note="Letture archiviate nella serie"
             icon={<Archive size={20} />}
           />
-        </section>
+        </section> : null}
 
         {error ? <div className="error-banner" role="alert">{error}</div> : null}
 
-        <section className="operations-grid">
+        {activePage === "overview" || activePage === "map" ? <section className="operations-grid">
           <article className="panel coverage-panel">
             <div className="panel-head">
               <div>
@@ -869,9 +817,9 @@ function App() {
               </p>
             </div>
           </article>
-        </section>
+        </section> : null}
 
-        <section className="detail-grid">
+        {activePage === "overview" || activePage === "sensors" ? <section className="detail-grid">
           <article className="panel sensor-panel">
             <div className="panel-head">
               <div>
@@ -908,50 +856,53 @@ function App() {
               ))}
             </div>
 
-            <div className="environment-grid">
-              <div>
-                <Thermometer size={16} />
+            <details className="detail-disclosure">
+              <summary>Dettagli ambientali e contesto</summary>
+              <div className="environment-grid">
                 <div>
-                  <span>Temperatura</span>
-                  <strong>{formatNumber(sensorDetail?.environment.temperature, 1)} °C</strong>
+                  <Thermometer size={16} />
+                  <div>
+                    <span>Temperatura</span>
+                    <strong>{formatNumber(sensorDetail?.environment.temperature, 1)} °C</strong>
+                  </div>
+                </div>
+                <div>
+                  <Droplets size={16} />
+                  <div>
+                    <span>Umidità</span>
+                    <strong>{formatNumber(sensorDetail?.environment.humidity, 0)}%</strong>
+                  </div>
+                </div>
+                <div>
+                  <RadioTower size={16} />
+                  <div>
+                    <span>Device sniffed</span>
+                    <strong>{formatNumber(sensorDetail?.environment.num_devices_sniffed, 0)}</strong>
+                  </div>
+                </div>
+                <div>
+                  <Gauge size={16} />
+                  <div>
+                    <span>Vento 10m</span>
+                    <strong>{formatNumber(sensorDetail?.environment.wind_speed_10m, 1)} km/h</strong>
+                  </div>
+                </div>
+                <div>
+                  <Trees size={16} />
+                  <div>
+                    <span>Indice verde</span>
+                    <strong>{formatNumber(sensorDetail?.environment.green_index, 2)}</strong>
+                  </div>
+                </div>
+                <div>
+                  <Archive size={16} />
+                  <div>
+                    <span>Background</span>
+                    <strong>{formatNumber(sensorDetail?.environment.background_value, 1)}</strong>
+                  </div>
                 </div>
               </div>
-              <div>
-                <Droplets size={16} />
-                <div>
-                  <span>Umidità</span>
-                  <strong>{formatNumber(sensorDetail?.environment.humidity, 0)}%</strong>
-                </div>
-              </div>
-              <div>
-                <RadioTower size={16} />
-                <div>
-                  <span>Device sniffed</span>
-                  <strong>{formatNumber(sensorDetail?.environment.num_devices_sniffed, 0)}</strong>
-                </div>
-              </div>
-              <div>
-                <Gauge size={16} />
-                <div>
-                  <span>Vento 10m</span>
-                  <strong>{formatNumber(sensorDetail?.environment.wind_speed_10m, 1)} km/h</strong>
-                </div>
-              </div>
-              <div>
-                <Trees size={16} />
-                <div>
-                  <span>Indice verde</span>
-                  <strong>{formatNumber(sensorDetail?.environment.green_index, 2)}</strong>
-                </div>
-              </div>
-              <div>
-                <Archive size={16} />
-                <div>
-                  <span>Background</span>
-                  <strong>{formatNumber(sensorDetail?.environment.background_value, 1)}</strong>
-                </div>
-              </div>
-            </div>
+            </details>
           </article>
 
           <article className="panel history-panel" id="history">
@@ -962,7 +913,7 @@ function App() {
               </div>
               <small>{sensorDetail?.sensor.name ?? "Seleziona un sensore dalla mappa o dalla tabella"}</small>
             </div>
-            <TrendChart points={currentHistory} pollutant={pollutant} />
+            <SensorHistoryChart points={currentHistory} pollutant={pollutant} />
             <div className="history-footer">
               <div>
                 <span>Ultima misura</span>
@@ -974,13 +925,24 @@ function App() {
               </div>
             </div>
           </article>
-        </section>
+        </section> : null}
 
-        <TwinAnalyticsPanel analytics={analytics} />
+        {activePage === "overview" || activePage === "insights" ? <TwinAnalyticsPanel analytics={analytics} /> : null}
 
-        <ProductWorkflowPanels pollutant={pollutant} timestamp={timestamp} summary={summary} />
+        {activePage === "overview" ? (
+          <ProductWorkflowPanels pollutant={pollutant} timestamp={timestamp} summary={summary} sections={["insights"]} />
+        ) : null}
+        {activePage === "scenarios" ? (
+          <ProductWorkflowPanels pollutant={pollutant} timestamp={timestamp} summary={summary} sections={["scenarios"]} />
+        ) : null}
+        {activePage === "insights" ? (
+          <ProductWorkflowPanels pollutant={pollutant} timestamp={timestamp} summary={summary} sections={["insights"]} />
+        ) : null}
+        {activePage === "settings" ? (
+          <ProductWorkflowPanels pollutant={pollutant} timestamp={timestamp} summary={summary} sections={["settings"]} />
+        ) : null}
 
-        <section className="panel table-panel" id="sensors">
+        {activePage === "sensors" ? <section className="panel table-panel" id="sensors">
           <div className="panel-head">
             <div>
               <span>Registro sensori</span>
@@ -1044,9 +1006,9 @@ function App() {
               ) : null}
             </tbody>
           </table>
-        </section>
+        </section> : null}
 
-        <section className="provenance-grid" id="provenance">
+        {activePage === "data-center" ? <section className="provenance-grid" id="provenance">
           <article className="panel provenance-panel">
             <div className="panel-head">
               <div>
@@ -1106,7 +1068,10 @@ function App() {
               </div>
             </div>
           </article>
-        </section>
+        </section> : null}
+        {activePage === "data-center" ? (
+          <ProductWorkflowPanels pollutant={pollutant} timestamp={timestamp} summary={summary} sections={["settings"]} />
+        ) : null}
           </>
         )}
           </>

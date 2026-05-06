@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { getJson, postJson, requestMessage } from "../api";
+import { ForecastBandChart } from "./Charts";
 import { formatDateTime, formatNumber, formatPercent, pollutantLabels } from "../format";
 import type {
   DecisionSupportPayload,
@@ -89,6 +90,7 @@ function ForecastDecisionPanel({ pollutant, timestamp }: { pollutant: string; ti
           <small>{forecast?.method ?? "baseline statistica"}</small>
         </div>
         {error ? <p className="job-error">{error}</p> : null}
+        <ForecastBandChart windows={forecast?.windows ?? []} />
         <div className="forecast-list">
           {(forecast?.windows ?? []).map((window) => (
             <div className="forecast-row" key={window.minutes}>
@@ -423,16 +425,18 @@ export function ProductWorkflowPanels({
   pollutant,
   timestamp,
   summary,
+  sections = ["scenarios", "insights", "settings"],
 }: {
   pollutant: string;
   timestamp: string | null;
   summary: Summary | null;
+  sections?: Array<"scenarios" | "insights" | "settings">;
 }) {
   return (
     <>
-      <ScenarioStudio pollutant={pollutant} timestamp={timestamp} />
-      <ForecastDecisionPanel pollutant={pollutant} timestamp={timestamp} />
-      <DataCenterSettings summary={summary} />
+      {sections.includes("scenarios") ? <ScenarioStudio pollutant={pollutant} timestamp={timestamp} /> : null}
+      {sections.includes("insights") ? <ForecastDecisionPanel pollutant={pollutant} timestamp={timestamp} /> : null}
+      {sections.includes("settings") ? <DataCenterSettings summary={summary} /> : null}
     </>
   );
 }

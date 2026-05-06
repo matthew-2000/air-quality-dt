@@ -22,6 +22,8 @@ live_sensors:
   snapshots:
     bucket_minutes: 1
     freshness_minutes: 5
+  timestamps:
+    max_future_skew_seconds: 120
   raw:
     sensor_metadata_path: config/sensors/sensor_PEDT.json
     mqtt_csv_path: data/raw/live_sensors/mqtt_data.csv
