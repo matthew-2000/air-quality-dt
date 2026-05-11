@@ -228,6 +228,32 @@ def test_forecast_contract(monkeypatch) -> None:
     assert payload["method"]
 
 
+def test_frontend_routes_serve_built_assets(monkeypatch, tmp_path) -> None:
+    dist_dir = tmp_path / "dist"
+    assets_dir = dist_dir / "assets"
+    assets_dir.mkdir(parents=True)
+    index_path = dist_dir / "index.html"
+    asset_path = assets_dir / "main.js"
+    index_path.write_text("<html><body>demo app</body></html>", encoding="utf-8")
+    asset_path.write_text("console.log('demo')", encoding="utf-8")
+
+    monkeypatch.setattr(api_main, "frontend_dist_dir", lambda: dist_dir)
+    monkeypatch.setattr(api_main, "frontend_index_path", lambda: index_path)
+    client = TestClient(api_main.app)
+
+    root_response = client.get("/")
+    assert root_response.status_code == 200
+    assert "demo app" in root_response.text
+
+    asset_response = client.get("/assets/main.js")
+    assert asset_response.status_code == 200
+    assert "console.log('demo')" in asset_response.text
+
+    spa_response = client.get("/dashboard")
+    assert spa_response.status_code == 200
+    assert "demo app" in spa_response.text
+
+
 def test_scenario_run_contract(monkeypatch) -> None:
     monkeypatch.setattr(api_main, "get_twin_service", lambda: FakeTwinService())
     client = TestClient(api_main.app)

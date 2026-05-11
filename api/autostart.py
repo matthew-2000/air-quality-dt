@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Callable
-from typing import Any
 
 import anyio
 
@@ -10,6 +10,8 @@ from api.events import SnapshotEventBus
 from unisa_air_twin.config import Settings
 from unisa_air_twin.product_jobs import collect_live_and_refresh, job_registry
 from unisa_air_twin.ui_data import TwinDataService
+
+logger = logging.getLogger(__name__)
 
 
 def _bool_env(name: str, default: bool) -> bool:
@@ -52,21 +54,19 @@ async def auto_ingest_loop(
     duration = _int_env("UNISA_AQDT_AUTO_INGEST_DURATION", 30)
     interval = _int_env("UNISA_AQDT_AUTO_INGEST_INTERVAL", 10)
     if not _mqtt_configured(settings):
-        job = job_registry.create("auto_ingest_mqtt", "Ingest automatico non avviato: MQTT non configurato.")
-        job_registry.run(job.job_id, lambda: (_raise_missing_mqtt()))
         return
 
     while True:
-        job = job_registry.create("auto_ingest_mqtt", "Ascolto MQTT automatico e refresh snapshot.")
-        await anyio.to_thread.run_sync(
-            job_registry.run,
-            job.job_id,
-            lambda: collect_live_and_refresh(settings, duration_seconds=duration),
-        )
-        service_factory().refresh()
-        await events.notify()
+        try:
+            job = job_registry.create("auto_ingest_mqtt", "Ascolto MQTT automatico e refresh snapshot.")
+            result = await anyio.to_thread.run_sync(
+                job_registry.run,
+                job.job_id,
+                lambda: collect_live_and_refresh(settings, duration_seconds=max(duration, 1)),
+            )
+            if result.status == "completed":
+                service_factory().refresh()
+                await events.notify()
+        except Exception:
+            logger.exception("Automatic MQTT ingest loop failed")
         await anyio.sleep(max(interval, 1))
-
-
-def _raise_missing_mqtt() -> dict[str, Any]:
-    raise RuntimeError("MQTT non configurato. Completa .env.local o variabili ambiente UNISA_MQTT_*.")

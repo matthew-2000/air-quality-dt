@@ -1,0 +1,11 @@
+.git
+.gitignore
+.venv
+__pycache__
+.pytest_cache
+.ruff_cache
+.DS_Store
+.codex-qa
+cache
+web/node_modules
+web/dist

@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: unisa-air-quality-dt
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./Dockerfile.api
+    dockerContext: .
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: UNISA_AQDT_AUTO_INGEST
+        value: "false"

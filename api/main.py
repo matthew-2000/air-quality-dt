@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Annotated, Any
 
 import anyio
 import pandas as pd
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from api.autostart import auto_ingest_loop
 from api.events import snapshot_events
@@ -48,6 +49,7 @@ from unisa_air_twin.product_jobs import (
     refresh_operational_snapshots,
 )
 from unisa_air_twin.ui_data import get_twin_service
+from unisa_air_twin.utils import project_path
 
 
 @asynccontextmanager
@@ -314,3 +316,44 @@ def decision_support(pollutant: str = Query(...), timestamp: str | None = Query(
 @app.get("/api/ops/health", response_model=OperationalHealthResponse)
 def ops_health() -> OperationalHealthResponse:
     return health_payload(get_twin_service().summary(), [job.to_dict() for job in job_registry.list(limit=50)])
+
+
+def frontend_dist_dir() -> Path:
+    return project_path("web", "dist")
+
+
+def frontend_index_path() -> Path:
+    return frontend_dist_dir() / "index.html"
+
+
+def _frontend_file(full_path: str) -> Path | None:
+    root = frontend_dist_dir().resolve()
+    candidate = (root / full_path).resolve()
+    if candidate == root:
+        return None
+    if root not in candidate.parents:
+        return None
+    if candidate.is_file():
+        return candidate
+    return None
+
+
+@app.get("/", include_in_schema=False)
+def frontend_index() -> Response:
+    index_path = frontend_index_path()
+    if not index_path.exists():
+        raise HTTPException(status_code=503, detail="Frontend assets not available")
+    return FileResponse(index_path)
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+def frontend_routes(full_path: str) -> Response:
+    if full_path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="Not found")
+    index_path = frontend_index_path()
+    if not index_path.exists():
+        raise HTTPException(status_code=503, detail="Frontend assets not available")
+    asset = _frontend_file(full_path)
+    if asset is not None:
+        return FileResponse(asset)
+    return FileResponse(index_path)

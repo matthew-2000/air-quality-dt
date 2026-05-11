@@ -86,6 +86,22 @@ Le risposte Open-Meteo sono salvate in `data/raw/external/` e riusate come cache
 
 ## Avvio App
 
+### Deploy demo su Render Free
+
+Il percorso piu' affidabile per demo su Render e' un singolo **Web Service** Docker che serve:
+
+- API FastAPI
+- dashboard React buildata e servita dalla stessa app
+- dataset demo incluso nell'immagine
+
+Nel repository c'e' gia' un blueprint minimo in `render.yaml` e la build usa `Dockerfile.api`.
+
+Scelta operativa consigliata per demo:
+
+- `UNISA_AQDT_AUTO_INGEST=false` su Render per evitare dipendenze live da MQTT;
+- abilita le variabili `UNISA_MQTT_*` solo se vuoi davvero mostrare ingest live;
+- ogni redeploy/ripartenza riparte dal dataset demo incluso nell'immagine, quindi lo stato resta coerente anche senza disco persistente.
+
 ### Deploy demo/produzione locale
 
 ```bash
