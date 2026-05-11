@@ -162,6 +162,10 @@ class ScenarioRunRequest(BaseModel):
     parameters: dict[str, Any] = Field(default_factory=dict)
 
 
+class ScenarioCatalogResponse(BaseModel):
+    scenarios: list[dict[str, Any]]
+
+
 class ScenarioRunResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -195,3 +199,33 @@ class OperationalHealthResponse(BaseModel):
 
     services: list[dict[str, Any]]
     backup: dict[str, Any]
+
+
+class TwinAssetsResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    assets: list[dict[str, Any]]
+    relationships: list[dict[str, Any]]
+    counts: dict[str, int]
+
+
+class TwinStateResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    state_id: str
+    pollutant: str
+    timestamp: str | None = None
+    status: str
+    quality: dict[str, Any]
+    entities: dict[str, list[dict[str, Any]]]
+    gaps: list[dict[str, Any]]
+
+
+class TwinValidationResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    pollutant: str
+    timestamp: str | None = None
+    status: str
+    metrics: dict[str, Any]
+    windows: list[dict[str, Any]]

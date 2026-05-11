@@ -286,6 +286,8 @@ export type ScenarioRun = {
     risk?: string;
     zone_deltas?: Array<{ zone: string; zone_name: string; baseline?: number | null; scenario?: number | null; delta?: number | null }>;
     drivers?: string[];
+    affected_assets?: string[];
+    assumptions?: string[];
     areas_to_watch?: string[];
     sensors_to_check?: string[];
     method_notes?: string;
@@ -294,6 +296,20 @@ export type ScenarioRun = {
 
 export type ScenarioRunList = {
   runs: ScenarioRun[];
+};
+
+export type ScenarioDefinition = {
+  id: string;
+  label: string;
+  category: string;
+  description: string;
+  affected_assets: string[];
+  effects: Record<string, number>;
+  assumptions: string[];
+};
+
+export type ScenarioCatalog = {
+  scenarios: ScenarioDefinition[];
 };
 
 export type DecisionSupportPayload = {
@@ -307,4 +323,46 @@ export type DecisionSupportPayload = {
 export type OperationalHealthPayload = {
   services: Array<{ name: string; status: string; detail?: string | null }>;
   backup: { status: string; restore_test: string; last_backup?: string | null };
+};
+
+export type TwinAssetsPayload = {
+  assets: Array<{ asset_id: string; kind: string; name: string; status: string; properties?: Record<string, unknown> }>;
+  relationships: Array<{ source: string; target: string; type: string }>;
+  counts: Record<string, number>;
+};
+
+export type TwinStatePayload = {
+  state_id: string;
+  pollutant: string;
+  timestamp?: string | null;
+  status: string;
+  quality: {
+    coverage_ratio?: number | null;
+    active_sensors?: number;
+    capable_sensors?: number;
+    median_age_seconds?: number | null;
+    mean_uncertainty?: number | null;
+    feed_status?: string;
+  };
+  entities: {
+    sensors: Array<Record<string, unknown>>;
+    zones: Array<Record<string, unknown>>;
+  };
+  gaps: Array<{ type: string; severity: string; detail: string }>;
+};
+
+export type TwinValidationPayload = {
+  pollutant: string;
+  timestamp?: string | null;
+  status: string;
+  metrics: { mae?: number | null; bias?: number | null; validated_windows: number };
+  windows: Array<{
+    minutes: number;
+    target_timestamp: string;
+    expected_value?: number | null;
+    actual_value?: number | null;
+    error?: number | null;
+    status: string;
+    sample_rows: number;
+  }>;
 };

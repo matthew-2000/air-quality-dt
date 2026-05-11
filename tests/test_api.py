@@ -95,6 +95,7 @@ class FakeTwinService:
                 ]
             ),
             "layers": {"zones": {"type": "FeatureCollection", "features": []}},
+            "sensors": pd.DataFrame([{"sensor_id": "A", "name": "Sensore A", "lat": 40.771, "lon": 14.79, "zone": "campus"}]),
         }
 
     def snapshot(self, pollutant: str, timestamp: str) -> pd.DataFrame:
@@ -312,6 +313,16 @@ def test_scenario_run_contract(monkeypatch, tmp_path) -> None:
     assert runs.status_code == 200
     assert runs.json()["runs"]
 
+    catalog = client.get("/api/scenarios/catalog")
+    assert catalog.status_code == 200
+    assert catalog.json()["scenarios"][0]["effects"]
+
+    invalid = client.post(
+        "/api/scenarios/run",
+        json={"scenario_type": "unknown", "pollutant": "pm10", "timestamp": "2026-01-01T10:01:00", "intensity": 1},
+    )
+    assert invalid.status_code == 422
+
 
 def test_decision_support_and_health_contract(monkeypatch, tmp_path) -> None:
     settings = isolated_settings(tmp_path)
@@ -326,3 +337,22 @@ def test_decision_support_and_health_contract(monkeypatch, tmp_path) -> None:
     assert decision.json()["what_to_do_now"]
     assert health.status_code == 200
     assert health.json()["services"][0]["name"] == "API"
+
+
+def test_twin_core_contracts(monkeypatch, tmp_path) -> None:
+    settings = isolated_settings(tmp_path)
+    monkeypatch.setattr(api_main, "load_settings", lambda: settings)
+    monkeypatch.setattr(api_main, "get_twin_service", lambda: FakeTwinService())
+    client = TestClient(api_main.app)
+
+    assets = client.get("/api/twin/assets")
+    state = client.get("/api/twin/state?pollutant=pm10&timestamp=2026-01-01T10:01:00")
+    validation = client.get("/api/twin/validation?pollutant=pm10&timestamp=2026-01-01T10:00:00")
+
+    assert assets.status_code == 200
+    assert assets.json()["counts"]["sensor"] == 1
+    assert state.status_code == 200
+    assert state.json()["state_id"] == "pm10:2026-01-01T10:01:00"
+    assert state.json()["entities"]["sensors"][0]["sensor_id"] == "A"
+    assert validation.status_code == 200
+    assert "windows" in validation.json()

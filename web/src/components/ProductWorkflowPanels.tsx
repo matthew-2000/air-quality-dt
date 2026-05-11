@@ -21,26 +21,26 @@ import type {
   DecisionSupportPayload,
   ForecastPayload,
   OperationalHealthPayload,
+  ScenarioCatalog,
+  ScenarioDefinition,
   ScenarioRun,
   ScenarioRunList,
   Summary,
 } from "../types";
 
-const scenarioOptions = [
-  { id: "traffic_increase", label: "Aumento traffico", icon: <BarChart3 size={15} /> },
-  { id: "traffic_reduction", label: "Riduzione traffico", icon: <Gauge size={15} /> },
-  { id: "campus_event", label: "Evento campus", icon: <Sparkles size={15} /> },
-  { id: "parking_closure", label: "Chiusura parcheggio", icon: <AlertTriangle size={15} /> },
-  { id: "new_sensor", label: "Nuovo sensore", icon: <CheckCircle2 size={15} /> },
-  { id: "sensor_offline", label: "Sensore offline", icon: <AlertTriangle size={15} /> },
-  { id: "rain", label: "Pioggia", icon: <CloudRain size={15} /> },
-  { id: "wind", label: "Vento", icon: <Wind size={15} /> },
-  { id: "green_increase", label: "Aumento verde", icon: <Sparkles size={15} /> },
-  { id: "freshness_window", label: "Finestra freschezza", icon: <SlidersHorizontal size={15} /> },
-];
+function scenarioIcon(scenario: ScenarioDefinition) {
+  if (scenario.category === "mobility") return <BarChart3 size={15} />;
+  if (scenario.category === "weather" && scenario.id === "rain") return <CloudRain size={15} />;
+  if (scenario.category === "weather") return <Wind size={15} />;
+  if (scenario.category === "network" && scenario.id === "new_sensor") return <CheckCircle2 size={15} />;
+  if (scenario.category === "network") return <SlidersHorizontal size={15} />;
+  if (scenario.category === "mitigation") return <Sparkles size={15} />;
+  if (scenario.category === "operations") return <Gauge size={15} />;
+  return <AlertTriangle size={15} />;
+}
 
-function scenarioLabel(id: string) {
-  return scenarioOptions.find((option) => option.id === id)?.label ?? id.replaceAll("_", " ");
+function scenarioLabel(id: string, catalog: ScenarioDefinition[]) {
+  return catalog.find((option) => option.id === id)?.label ?? id.replaceAll("_", " ");
 }
 
 function statusTone(status: string) {
@@ -159,6 +159,7 @@ function ForecastDecisionPanel({ pollutant, timestamp }: { pollutant: string; ti
 
 function ScenarioStudio({ pollutant, timestamp }: { pollutant: string; timestamp: string | null }) {
   const [scenarioType, setScenarioType] = useState("traffic_increase");
+  const [catalog, setCatalog] = useState<ScenarioDefinition[]>([]);
   const [intensity, setIntensity] = useState(1);
   const [runs, setRuns] = useState<ScenarioRun[]>([]);
   const [selectedRun, setSelectedRun] = useState<ScenarioRun | null>(null);
@@ -176,10 +177,19 @@ function ScenarioStudio({ pollutant, timestamp }: { pollutant: string; timestamp
 
   useEffect(loadRuns, []);
 
+  useEffect(() => {
+    getJson<ScenarioCatalog>("/api/scenarios/catalog")
+      .then((payload) => {
+        setCatalog(payload.scenarios);
+        setScenarioType((current) => (payload.scenarios.some((scenario) => scenario.id === current) ? current : payload.scenarios[0]?.id ?? current));
+      })
+      .catch((reason) => setError(requestMessage(reason)));
+  }, []);
+
   const runScenario = () => {
     setBusy(true);
     postJson<ScenarioRun>("/api/scenarios/run", {
-      name: scenarioLabel(scenarioType),
+      name: scenarioLabel(scenarioType, catalog),
       scenario_type: scenarioType,
       pollutant,
       timestamp,
@@ -196,6 +206,7 @@ function ScenarioStudio({ pollutant, timestamp }: { pollutant: string; timestamp
   };
 
   const topDeltas = selectedRun?.output.zone_deltas?.slice(0, 4) ?? [];
+  const selectedDefinition = catalog.find((scenario) => scenario.id === scenarioType) ?? null;
 
   return (
     <section className="scenario-section" id="scenarios">
@@ -209,7 +220,7 @@ function ScenarioStudio({ pollutant, timestamp }: { pollutant: string; timestamp
         </div>
 
         <div className="scenario-type-grid">
-          {scenarioOptions.map((option) => (
+          {catalog.map((option) => (
             <button
               key={option.id}
               type="button"
@@ -217,11 +228,18 @@ function ScenarioStudio({ pollutant, timestamp }: { pollutant: string; timestamp
               onClick={() => setScenarioType(option.id)}
               aria-pressed={option.id === scenarioType}
             >
-              {option.icon}
+              {scenarioIcon(option)}
               {option.label}
             </button>
           ))}
+          {!catalog.length ? <div className="chart-empty">Catalogo scenari non disponibile.</div> : null}
         </div>
+
+        {selectedDefinition ? (
+          <p className="method-note">
+            {selectedDefinition.description} Asset impattati: {selectedDefinition.affected_assets.join(", ")}.
+          </p>
+        ) : null}
 
         <label className="range-control">
           <span>Intensità intervento</span>
@@ -237,7 +255,7 @@ function ScenarioStudio({ pollutant, timestamp }: { pollutant: string; timestamp
           <strong>{formatNumber(intensity, 1)}x</strong>
         </label>
 
-        <button type="button" className="primary-action" onClick={runScenario} disabled={busy || !timestamp}>
+        <button type="button" className="primary-action" onClick={runScenario} disabled={busy || !timestamp || !catalog.length}>
           <Save size={16} />
           {busy ? "Simulazione..." : "Esegui e salva run"}
         </button>
@@ -276,6 +294,9 @@ function ScenarioStudio({ pollutant, timestamp }: { pollutant: string; timestamp
             <div className="driver-list">
               {(selectedRun.output.drivers ?? []).map((driver) => (
                 <span key={driver}>{driver}</span>
+              ))}
+              {(selectedRun.output.affected_assets ?? []).map((asset) => (
+                <span key={`asset-${asset}`}>asset: {asset}</span>
               ))}
             </div>
             <div className="zone-delta-list">

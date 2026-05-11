@@ -29,7 +29,12 @@ from unisa_air_twin.operational_store import (
     read_metadata,
     read_observations,
     read_raw_message_count,
+    read_sensor_observations,
+    read_sensor_snapshot,
+    read_sensor_timeseries,
     read_sensors,
+    read_snapshot,
+    read_snapshot_timestamps,
     read_snapshots,
     replace_snapshots,
 )
@@ -45,6 +50,16 @@ def frame_records(frame: pd.DataFrame) -> list[dict[str, Any]]:
         output[column] = output[column].dt.strftime("%Y-%m-%dT%H:%M:%S")
     output = output.where(pd.notna(output), None)
     return output.to_dict(orient="records")
+
+
+def parse_temporal_columns(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
+        return frame
+    output = frame.copy()
+    for column in ["timestamp", "received_at", "downloaded_at", "measured_at"]:
+        if column in output.columns:
+            output[column] = pd.to_datetime(output[column], errors="coerce")
+    return output
 
 
 def sensor_status(age_seconds: Any) -> str:
@@ -141,12 +156,7 @@ class TwinDataService:
             if sensors.empty:
                 sensors = load_sensor_catalog(self.settings)
 
-        if "timestamp" in observations.columns:
-            observations["timestamp"] = pd.to_datetime(observations["timestamp"], errors="coerce")
-        if "received_at" in observations.columns:
-            observations["received_at"] = pd.to_datetime(observations["received_at"], errors="coerce")
-        if "downloaded_at" in observations.columns:
-            observations["downloaded_at"] = pd.to_datetime(observations["downloaded_at"], errors="coerce")
+        observations = parse_temporal_columns(observations)
         observations = attach_zones(observations, self._load_static_data()["layers"]["zones"])
         observations = annotate_quality(observations)
 
@@ -154,12 +164,7 @@ class TwinDataService:
         if estimates.empty and not observations.empty:
             estimates = build_operational_snapshots(self.settings, observations)
             replace_snapshots(self.settings, estimates)
-        if "timestamp" in estimates.columns:
-            estimates["timestamp"] = pd.to_datetime(estimates["timestamp"], errors="coerce")
-        if "measured_at" in estimates.columns:
-            estimates["measured_at"] = pd.to_datetime(estimates["measured_at"], errors="coerce")
-        if "received_at" in estimates.columns:
-            estimates["received_at"] = pd.to_datetime(estimates["received_at"], errors="coerce")
+        estimates = parse_temporal_columns(estimates)
         estimates = attach_zones(estimates, self._load_static_data()["layers"]["zones"])
         estimates = annotate_quality(estimates)
 
@@ -320,9 +325,15 @@ class TwinDataService:
         return rows
 
     def timestamps(self, pollutant: str) -> list[str]:
+        timestamps = read_snapshot_timestamps(self.settings, pollutant)
+        if timestamps:
+            return [pd.Timestamp(ts).strftime("%Y-%m-%dT%H:%M:%S") for ts in timestamps]
         return self._timestamps_from_estimates(self.load()["estimates"], pollutant)
 
     def snapshot(self, pollutant: str, timestamp: str | pd.Timestamp) -> pd.DataFrame:
+        snapshot = parse_temporal_columns(read_snapshot(self.settings, pollutant, timestamp))
+        if not snapshot.empty:
+            return annotate_quality(attach_zones(snapshot, self._load_static_data()["layers"]["zones"]))
         return self._snapshot_from_estimates(self.load()["estimates"], pollutant, timestamp)
 
     def _timestamps_from_estimates(self, estimates: pd.DataFrame, pollutant: str) -> list[str]:
@@ -337,15 +348,15 @@ class TwinDataService:
         return sensor_snapshot(estimates, pollutant, pd.Timestamp(timestamp))
 
     def map_payload(self, pollutant: str, timestamp: str | pd.Timestamp, resolution: int = 24) -> dict[str, Any]:
-        data = self.load()
-        snapshot = self._snapshot_from_estimates(data["estimates"], pollutant, timestamp).copy()
+        static_data = self._load_static_data()
+        snapshot = self.snapshot(pollutant, timestamp).copy()
         if not snapshot.empty:
             snapshot["status"] = snapshot["reading_age_seconds"].map(sensor_status)
             snapshot["reading_age_minutes"] = (pd.to_numeric(snapshot["reading_age_seconds"], errors="coerce") / 60.0).round(1)
         grid = build_interpolation_grid(snapshot, resolution=resolution)
         reliability_grid = build_reliability_grid(snapshot, resolution=resolution)
-        zones = zone_summary(snapshot, data["layers"]["zones"])
-        colored_zones = colored_zone_geojson(data["layers"]["zones"], zones)
+        zones = zone_summary(snapshot, static_data["layers"]["zones"])
+        colored_zones = colored_zone_geojson(static_data["layers"]["zones"], zones)
         ages = pd.to_numeric(snapshot["reading_age_seconds"], errors="coerce") if "reading_age_seconds" in snapshot.columns else pd.Series(dtype=float)
         values = pd.to_numeric(snapshot["estimated_value"], errors="coerce") if "estimated_value" in snapshot.columns else pd.Series(dtype=float)
         meta = {
@@ -367,27 +378,31 @@ class TwinDataService:
             "min_value": round(float(values.min()), 3) if not values.empty else None,
             "max_value": round(float(values.max()), 3) if not values.empty else None,
         }
-        stations = data["stations"].dropna(subset=["lat", "lon"]) if not data["stations"].empty else pd.DataFrame()
+        stations = static_data["stations"].dropna(subset=["lat", "lon"]) if not static_data["stations"].empty else pd.DataFrame()
         return {
             "snapshot": frame_records(snapshot),
             "grid": frame_records(grid),
             "reliability_grid": frame_records(reliability_grid),
             "zones": colored_zones,
             "zone_summary": frame_records(zones),
-            "layers": data["layers"],
+            "layers": static_data["layers"],
             "stations": frame_records(stations),
             "meta": meta,
         }
 
     def sensor_detail(self, sensor_id: str, timestamp: str | pd.Timestamp) -> dict[str, Any]:
-        data = self.load()
         selected_timestamp = pd.Timestamp(timestamp)
-        sensors = data["sensors"]
+        sensors = read_sensors(self.settings)
+        if sensors.empty:
+            sensors = geojson_points_to_frame(self.settings.processed_dir / "campus_real_sensors.geojson")
+            if sensors.empty:
+                sensors = load_sensor_catalog(self.settings)
         sensor_frame = sensors[sensors["sensor_id"] == sensor_id].copy()
         sensor_meta = sensor_frame.iloc[0].to_dict() if not sensor_frame.empty else {"sensor_id": sensor_id}
 
-        estimates = data["estimates"]
-        snapshot = estimates[(estimates["sensor_id"] == sensor_id) & (estimates["timestamp"] == selected_timestamp)].copy()
+        snapshot = parse_temporal_columns(read_sensor_snapshot(self.settings, sensor_id, selected_timestamp))
+        if not snapshot.empty:
+            snapshot = annotate_quality(attach_zones(snapshot, self._load_static_data()["layers"]["zones"]))
         configured_order = self.settings.model.get("pollutants", [])
         if not snapshot.empty:
             snapshot["status"] = snapshot["reading_age_seconds"].map(sensor_status)
@@ -395,8 +410,10 @@ class TwinDataService:
             snapshot["pollutant_order"] = snapshot["pollutant"].map(lambda value: order_map.get(str(value), 999))
             snapshot = snapshot.sort_values(["pollutant_order", "pollutant"]).drop(columns=["pollutant_order"])
 
-        observations = data["observations"]
-        raw_history = observations[observations["sensor_id"] == sensor_id].copy()
+        raw_history = parse_temporal_columns(read_sensor_observations(self.settings, sensor_id))
+        if raw_history.empty:
+            raw_history = self.load()["observations"]
+            raw_history = raw_history[raw_history["sensor_id"] == sensor_id].copy() if "sensor_id" in raw_history.columns else pd.DataFrame()
         raw_history = raw_history.sort_values(["timestamp", "pollutant"])
         history_payload: dict[str, list[dict[str, Any]]] = {}
         for pollutant in ordered_pollutants(raw_history["pollutant"].dropna().unique().tolist(), configured_order):
@@ -430,10 +447,14 @@ class TwinDataService:
         }
 
     def timeseries(self, pollutant: str, sensor_name: str) -> list[dict[str, Any]]:
-        observations = self.load()["observations"]
-        if observations.empty:
+        subset = parse_temporal_columns(read_sensor_timeseries(self.settings, pollutant, sensor_name))
+        if subset.empty:
+            observations = self.load()["observations"]
+            if observations.empty:
+                return []
+            subset = observations[(observations["pollutant"] == pollutant) & (observations["sensor_name"] == sensor_name)]
+        if subset.empty:
             return []
-        subset = observations[(observations["pollutant"] == pollutant) & (observations["sensor_name"] == sensor_name)]
         return frame_records(subset.sort_values("timestamp"))
 
     def analytics(self, pollutant: str, timestamp: str | None = None) -> dict[str, Any]:

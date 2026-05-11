@@ -1,8 +1,20 @@
 from __future__ import annotations
 
+import pandas as pd
+
 from unisa_air_twin.config import load_settings
 from unisa_air_twin.decision_engine import ScenarioRun, ScenarioRunStore
-from unisa_air_twin.operational_store import read_job_run, read_scenario_runs
+from unisa_air_twin.operational_store import (
+    read_job_run,
+    read_scenario_runs,
+    read_sensor_observations,
+    read_sensor_snapshot,
+    read_sensor_timeseries,
+    read_snapshot,
+    read_snapshot_timestamps,
+    replace_observations,
+    replace_snapshots,
+)
 from unisa_air_twin.product_jobs import JobRegistry
 
 
@@ -54,3 +66,60 @@ def test_scenario_store_persists_runs(tmp_path) -> None:
     assert persisted[0]["run_id"] == "scenario-1"
     assert persisted[0]["parameters"] == {"source": "test"}
     assert persisted[0]["output"] == {"delta_mean": -2.5}
+
+
+def test_targeted_snapshot_queries_do_not_require_full_store_scan(tmp_path) -> None:
+    settings = isolated_settings(tmp_path)
+    snapshots = pd.DataFrame(
+        [
+            {
+                "timestamp": pd.Timestamp("2026-05-11 10:00:00"),
+                "received_at": pd.Timestamp("2026-05-11 10:00:10"),
+                "sensor_id": "A",
+                "sensor_name": "Sensore A",
+                "pollutant": "pm10",
+                "estimated_value": 12.0,
+            },
+            {
+                "timestamp": pd.Timestamp("2026-05-11 10:01:00"),
+                "received_at": pd.Timestamp("2026-05-11 10:01:10"),
+                "sensor_id": "B",
+                "sensor_name": "Sensore B",
+                "pollutant": "pm25",
+                "estimated_value": 7.0,
+            },
+        ]
+    )
+    replace_snapshots(settings, snapshots)
+
+    assert read_snapshot_timestamps(settings, "pm10") == ["2026-05-11T10:00:00"]
+    assert read_snapshot(settings, "pm10", "2026-05-11T10:00:00")["sensor_id"].tolist() == ["A"]
+    assert read_sensor_snapshot(settings, "B", "2026-05-11T10:01:00")["pollutant"].tolist() == ["pm25"]
+
+
+def test_targeted_sensor_history_queries(tmp_path) -> None:
+    settings = isolated_settings(tmp_path)
+    observations = pd.DataFrame(
+        [
+            {
+                "timestamp": pd.Timestamp("2026-05-11 10:00:00"),
+                "received_at": pd.Timestamp("2026-05-11 10:00:10"),
+                "sensor_id": "A",
+                "sensor_name": "Sensore A",
+                "pollutant": "pm10",
+                "estimated_value": 12.0,
+            },
+            {
+                "timestamp": pd.Timestamp("2026-05-11 10:01:00"),
+                "received_at": pd.Timestamp("2026-05-11 10:01:10"),
+                "sensor_id": "B",
+                "sensor_name": "Sensore B",
+                "pollutant": "pm25",
+                "estimated_value": 7.0,
+            },
+        ]
+    )
+    replace_observations(settings, observations)
+
+    assert read_sensor_observations(settings, "A")["sensor_name"].tolist() == ["Sensore A"]
+    assert read_sensor_timeseries(settings, "pm25", "Sensore B")["estimated_value"].tolist() == [7.0]

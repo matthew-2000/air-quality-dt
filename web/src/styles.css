@@ -430,7 +430,8 @@ a:focus-visible,
 
 .operations-grid,
 .detail-grid,
-.provenance-grid {
+.provenance-grid,
+.twin-core-grid {
   display: grid;
   gap: 18px;
 }
@@ -444,6 +445,10 @@ a:focus-visible,
 }
 
 .provenance-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.twin-core-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
@@ -1587,6 +1592,7 @@ input {
   .operations-grid,
   .detail-grid,
   .provenance-grid,
+  .twin-core-grid,
   .analytics-grid,
     .summary-grid,
     .scenario-section,

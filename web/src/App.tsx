@@ -38,6 +38,7 @@ import { DataJobsPanel } from "./components/DataJobsPanel";
 import { EmptyStatePanel } from "./components/EmptyStatePanel";
 import { SummaryCard } from "./components/SummaryCard";
 import { TwinAnalyticsPanel } from "./components/TwinAnalyticsPanel";
+import { TwinCorePanel } from "./components/TwinCorePanel";
 import { ProductWorkflowPanels } from "./components/ProductWorkflowPanels";
 import { pageItems } from "./pages/pageConfig";
 import type { PageId } from "./pages/pageConfig";
@@ -931,6 +932,9 @@ function App() {
 
         {activePage === "overview" ? (
           <ProductWorkflowPanels pollutant={pollutant} timestamp={timestamp} summary={summary} sections={["insights"]} />
+        ) : null}
+        {activePage === "overview" || activePage === "twin-core" ? (
+          <TwinCorePanel pollutant={pollutant} timestamp={timestamp} />
         ) : null}
         {activePage === "scenarios" ? (
           <ProductWorkflowPanels pollutant={pollutant} timestamp={timestamp} summary={summary} sections={["scenarios"]} />

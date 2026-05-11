@@ -431,6 +431,13 @@ def replace_snapshots(settings: Settings, snapshots: pd.DataFrame) -> None:
             )
 
 
+def _timestamp_value(value: str | pd.Timestamp) -> str:
+    timestamp = pd.Timestamp(value)
+    if pd.isna(timestamp):
+        return str(value)
+    return timestamp.strftime("%Y-%m-%dT%H:%M:%S")
+
+
 def read_sensors(settings: Settings) -> pd.DataFrame:
     ensure_schema(settings)
     with connect_db(settings) as connection:
@@ -455,6 +462,53 @@ def read_snapshots(settings: Settings) -> pd.DataFrame:
         )
 
 
+def read_snapshot_timestamps(settings: Settings, pollutant: str) -> list[str]:
+    ensure_schema(settings)
+    with connect_db(settings) as connection:
+        rows = connection.execute(
+            """
+            SELECT DISTINCT timestamp
+            FROM operational_snapshots
+            WHERE pollutant = ? AND timestamp IS NOT NULL
+            ORDER BY timestamp
+            """,
+            [pollutant],
+        ).fetchall()
+    return [str(row["timestamp"]) for row in rows]
+
+
+def read_snapshot(settings: Settings, pollutant: str, timestamp: str | pd.Timestamp) -> pd.DataFrame:
+    ensure_schema(settings)
+    timestamp_key = _timestamp_value(timestamp)
+    with connect_db(settings) as connection:
+        return pd.read_sql_query(
+            """
+            SELECT *
+            FROM operational_snapshots
+            WHERE pollutant = ? AND timestamp = ?
+            ORDER BY sensor_id, received_at
+            """,
+            connection,
+            params=[pollutant, timestamp_key],
+        )
+
+
+def read_sensor_snapshot(settings: Settings, sensor_id: str, timestamp: str | pd.Timestamp) -> pd.DataFrame:
+    ensure_schema(settings)
+    timestamp_key = _timestamp_value(timestamp)
+    with connect_db(settings) as connection:
+        return pd.read_sql_query(
+            """
+            SELECT *
+            FROM operational_snapshots
+            WHERE sensor_id = ? AND timestamp = ?
+            ORDER BY pollutant, received_at
+            """,
+            connection,
+            params=[sensor_id, timestamp_key],
+        )
+
+
 def read_recent_observations(settings: Settings, since_timestamp: str | None = None) -> pd.DataFrame:
     ensure_schema(settings)
     with connect_db(settings) as connection:
@@ -471,6 +525,36 @@ def read_recent_observations(settings: Settings, since_timestamp: str | None = N
             """,
             connection,
             params=[since_timestamp],
+        )
+
+
+def read_sensor_observations(settings: Settings, sensor_id: str) -> pd.DataFrame:
+    ensure_schema(settings)
+    with connect_db(settings) as connection:
+        return pd.read_sql_query(
+            """
+            SELECT *
+            FROM observations
+            WHERE sensor_id = ?
+            ORDER BY timestamp, pollutant, received_at
+            """,
+            connection,
+            params=[sensor_id],
+        )
+
+
+def read_sensor_timeseries(settings: Settings, pollutant: str, sensor_name: str) -> pd.DataFrame:
+    ensure_schema(settings)
+    with connect_db(settings) as connection:
+        return pd.read_sql_query(
+            """
+            SELECT *
+            FROM observations
+            WHERE pollutant = ? AND sensor_name = ?
+            ORDER BY timestamp, received_at
+            """,
+            connection,
+            params=[pollutant, sensor_name],
         )
 
 

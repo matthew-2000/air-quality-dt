@@ -24,6 +24,7 @@ from unisa_air_twin.api_schemas import (
     MapPayloadResponse,
     OperationalHealthResponse,
     RefreshResponse,
+    ScenarioCatalogResponse,
     ScenarioRunListResponse,
     ScenarioRunRequest,
     ScenarioRunResponse,
@@ -31,6 +32,9 @@ from unisa_air_twin.api_schemas import (
     SummaryResponse,
     TimeseriesResponse,
     TimestampsResponse,
+    TwinAssetsResponse,
+    TwinStateResponse,
+    TwinValidationResponse,
 )
 from unisa_air_twin.config import load_settings
 from unisa_air_twin.decision_engine import (
@@ -38,6 +42,8 @@ from unisa_air_twin.decision_engine import (
     forecast_payload,
     health_payload,
     run_scenario,
+    scenario_catalog,
+    scenario_definition,
     scenario_store,
 )
 from unisa_air_twin.external_sources import read_source_statuses
@@ -50,6 +56,7 @@ from unisa_air_twin.product_jobs import (
     refresh_external_sources,
     refresh_operational_snapshots,
 )
+from unisa_air_twin.twin_core import asset_registry_payload, state_payload, validation_payload
 from unisa_air_twin.ui_data import get_twin_service
 from unisa_air_twin.utils import project_path
 
@@ -314,6 +321,8 @@ def forecast(pollutant: str = Query(...), timestamp: str | None = Query(default=
 def scenario_run(request: ScenarioRunRequest) -> ScenarioRunResponse:
     settings = load_settings()
     service = get_twin_service()
+    if scenario_definition(request.scenario_type) is None:
+        raise HTTPException(status_code=422, detail=f"Unknown scenario_type: {request.scenario_type}")
     selected_timestamp = _resolve_timestamp(request.pollutant, request.timestamp)
     if not selected_timestamp:
         raise HTTPException(status_code=422, detail="No baseline timestamp available for scenario")
@@ -330,6 +339,11 @@ def scenario_run(request: ScenarioRunRequest) -> ScenarioRunResponse:
         request.parameters,
         settings,
     )
+
+
+@app.get("/api/scenarios/catalog", response_model=ScenarioCatalogResponse)
+def scenario_catalog_endpoint() -> ScenarioCatalogResponse:
+    return {"scenarios": scenario_catalog()}
 
 
 @app.get("/api/scenarios/runs", response_model=ScenarioRunListResponse)
@@ -353,6 +367,30 @@ def decision_support(pollutant: str = Query(...), timestamp: str | None = Query(
 def ops_health() -> OperationalHealthResponse:
     settings = load_settings()
     return health_payload(get_twin_service().summary(), [job.to_dict() for job in job_registry.list(limit=50, settings=settings)])
+
+
+@app.get("/api/twin/assets", response_model=TwinAssetsResponse)
+def twin_assets() -> TwinAssetsResponse:
+    service = get_twin_service()
+    return asset_registry_payload(service.summary(), service.load())
+
+
+@app.get("/api/twin/state", response_model=TwinStateResponse)
+def twin_state(pollutant: str = Query(...), timestamp: str | None = Query(default=None)) -> TwinStateResponse:
+    service = get_twin_service()
+    selected_timestamp = _resolve_timestamp(pollutant, timestamp)
+    snapshot = service.snapshot(pollutant, selected_timestamp) if selected_timestamp else pd.DataFrame()
+    analytics_response = service.analytics(pollutant, selected_timestamp)
+    return state_payload(service.summary(), snapshot, analytics_response, pollutant, selected_timestamp)
+
+
+@app.get("/api/twin/validation", response_model=TwinValidationResponse)
+def twin_validation(pollutant: str = Query(...), timestamp: str | None = Query(default=None)) -> TwinValidationResponse:
+    service = get_twin_service()
+    selected_timestamp = _resolve_timestamp(pollutant, timestamp)
+    snapshot = service.snapshot(pollutant, selected_timestamp) if selected_timestamp else pd.DataFrame()
+    data = service.load()
+    return validation_payload(data["observations"], snapshot, pollutant, selected_timestamp)
 
 
 def frontend_dist_dir() -> Path:

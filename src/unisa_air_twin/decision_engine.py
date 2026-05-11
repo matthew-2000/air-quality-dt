@@ -12,18 +12,106 @@ from unisa_air_twin.analytics import zone_summary
 from unisa_air_twin.config import Settings
 from unisa_air_twin.operational_store import read_scenario_runs, write_scenario_run
 
-SCENARIO_DELTAS: dict[str, dict[str, float]] = {
-    "traffic_increase": {"pm10": 0.16, "pm25": 0.12, "pm1": 0.08, "no2": 0.18},
-    "traffic_reduction": {"pm10": -0.14, "pm25": -0.11, "pm1": -0.07, "no2": -0.16},
-    "campus_event": {"pm10": 0.2, "pm25": 0.14, "pm1": 0.1, "no2": 0.1},
-    "parking_closure": {"pm10": 0.09, "pm25": 0.06, "pm1": 0.04, "no2": 0.12},
-    "new_sensor": {"confidence": 0.12},
-    "sensor_offline": {"confidence": -0.18},
-    "rain": {"pm10": -0.18, "pm25": -0.12, "pm1": -0.08},
-    "wind": {"pm10": -0.1, "pm25": -0.08, "pm1": -0.06, "no2": -0.06},
-    "green_increase": {"pm10": -0.07, "pm25": -0.05, "pm1": -0.03, "confidence": 0.04},
-    "freshness_window": {"confidence": 0.08},
-}
+SCENARIO_CATALOG: list[dict[str, Any]] = [
+    {
+        "id": "traffic_increase",
+        "label": "Aumento traffico",
+        "category": "mobility",
+        "description": "Aumento dei flussi veicolari attorno agli assi campus.",
+        "affected_assets": ["roads", "parking", "zones"],
+        "effects": {"pm10": 0.16, "pm25": 0.12, "pm1": 0.08, "no2": 0.18},
+        "assumptions": ["effetto proporzionale all'intensità", "meteo invariato"],
+    },
+    {
+        "id": "traffic_reduction",
+        "label": "Riduzione traffico",
+        "category": "mobility",
+        "description": "Riduzione pressione veicolare per navette, ZTL o smart working.",
+        "affected_assets": ["roads", "parking", "zones"],
+        "effects": {"pm10": -0.14, "pm25": -0.11, "pm1": -0.07, "no2": -0.16},
+        "assumptions": ["riduzione uniforme sui sensori osservati", "nessun effetto rebound"],
+    },
+    {
+        "id": "campus_event",
+        "label": "Evento campus",
+        "category": "operations",
+        "description": "Afflusso concentrato di persone e mezzi per evento nel campus.",
+        "affected_assets": ["zones", "parking", "transport"],
+        "effects": {"pm10": 0.2, "pm25": 0.14, "pm1": 0.1, "no2": 0.1},
+        "assumptions": ["afflusso temporaneo", "stessa copertura sensori"],
+    },
+    {
+        "id": "parking_closure",
+        "label": "Chiusura parcheggio",
+        "category": "mobility",
+        "description": "Deviazione dei flussi per chiusura o saturazione parcheggio.",
+        "affected_assets": ["parking", "roads", "zones"],
+        "effects": {"pm10": 0.09, "pm25": 0.06, "pm1": 0.04, "no2": 0.12},
+        "assumptions": ["traffico ridistribuito su viabilità alternativa"],
+    },
+    {
+        "id": "new_sensor",
+        "label": "Nuovo sensore",
+        "category": "network",
+        "description": "Aggiunta di un punto misura per aumentare copertura e confidence.",
+        "affected_assets": ["sensors", "zones"],
+        "effects": {"confidence": 0.12},
+        "assumptions": ["nuovo sensore valido e calibrato"],
+    },
+    {
+        "id": "sensor_offline",
+        "label": "Sensore offline",
+        "category": "network",
+        "description": "Perdita temporanea di un sensore e riduzione della confidence.",
+        "affected_assets": ["sensors", "zones"],
+        "effects": {"confidence": -0.18},
+        "assumptions": ["nessuna misura sostitutiva disponibile"],
+    },
+    {
+        "id": "rain",
+        "label": "Pioggia",
+        "category": "weather",
+        "description": "Evento pioggia con lavaggio del particolato.",
+        "affected_assets": ["zones", "green"],
+        "effects": {"pm10": -0.18, "pm25": -0.12, "pm1": -0.08},
+        "assumptions": ["pioggia distribuita sul campus"],
+    },
+    {
+        "id": "wind",
+        "label": "Vento",
+        "category": "weather",
+        "description": "Aumento dispersione per vento favorevole.",
+        "affected_assets": ["zones"],
+        "effects": {"pm10": -0.1, "pm25": -0.08, "pm1": -0.06, "no2": -0.06},
+        "assumptions": ["direzione vento non modellata puntualmente"],
+    },
+    {
+        "id": "green_increase",
+        "label": "Aumento verde",
+        "category": "mitigation",
+        "description": "Intervento di verde urbano o barriere vegetali.",
+        "affected_assets": ["green", "zones"],
+        "effects": {"pm10": -0.07, "pm25": -0.05, "pm1": -0.03, "confidence": 0.04},
+        "assumptions": ["intervento già maturo ed efficace"],
+    },
+    {
+        "id": "freshness_window",
+        "label": "Finestra freschezza",
+        "category": "network",
+        "description": "Politica operativa che accetta una finestra dati più ampia.",
+        "affected_assets": ["sensors"],
+        "effects": {"confidence": 0.08},
+        "assumptions": ["dati coerenti anche se meno recenti"],
+    },
+]
+
+
+def scenario_catalog() -> list[dict[str, Any]]:
+    return [dict(item) for item in SCENARIO_CATALOG]
+
+
+def scenario_definition(scenario_type: str) -> dict[str, Any] | None:
+    return next((item for item in SCENARIO_CATALOG if item["id"] == scenario_type), None)
 
 
 def utc_timestamp() -> str:
@@ -152,7 +240,8 @@ def run_scenario(
     settings: Settings | None = None,
 ) -> dict[str, Any]:
     factor = max(min(float(intensity), 2.0), 0.0)
-    effects = SCENARIO_DELTAS.get(scenario_type, {})
+    definition = scenario_definition(scenario_type) or {}
+    effects = definition.get("effects", {})
     value_delta = effects.get(pollutant, effects.get("pm10", 0.0)) * factor
     confidence_delta = effects.get("confidence", 0.0) * factor
     simulated = snapshot.copy()
@@ -189,9 +278,11 @@ def run_scenario(
         "risk": risk_level(scenario_mean, pollutant),
         "zone_deltas": deltas,
         "drivers": scenario_drivers(scenario_type, value_delta, confidence_delta),
+        "affected_assets": definition.get("affected_assets", []),
+        "assumptions": definition.get("assumptions", []),
         "areas_to_watch": [row["zone_name"] for row in sorted(deltas, key=lambda item: item.get("scenario") or 0, reverse=True)[:3]],
         "sensors_to_check": sensor_actions(snapshot, scenario_type),
-        "method_notes": "Run what-if non distruttivo: modifica snapshot simulato, aggrega per zone, calcola delta e rischio stimato.",
+        "method_notes": "Simulation Engine v1: applica effetti dichiarati dal catalogo scenario allo snapshot canonico, aggrega per zone, calcola delta e rischio stimato.",
     }
     run = ScenarioRun(
         run_id=uuid4().hex,
@@ -209,19 +300,8 @@ def run_scenario(
 
 
 def scenario_drivers(scenario_type: str, value_delta: float, confidence_delta: float) -> list[str]:
-    labels = {
-        "traffic_increase": "traffico campus più intenso",
-        "traffic_reduction": "riduzione pressione veicolare",
-        "campus_event": "evento con afflusso concentrato",
-        "parking_closure": "spostamento flussi verso aree alternative",
-        "new_sensor": "copertura rete più forte",
-        "sensor_offline": "copertura rete ridotta",
-        "rain": "lavaggio particolato da pioggia",
-        "wind": "dispersione favorita dal vento",
-        "green_increase": "mitigazione verde",
-        "freshness_window": "finestra freschezza più permissiva",
-    }
-    drivers = [labels.get(scenario_type, "parametri scenario")]
+    definition = scenario_definition(scenario_type) or {}
+    drivers = [definition.get("description") or "parametri scenario"]
     if value_delta:
         drivers.append(f"delta inquinante stimato {round(value_delta * 100, 1)}%")
     if confidence_delta:
