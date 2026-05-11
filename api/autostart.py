@@ -58,11 +58,12 @@ async def auto_ingest_loop(
 
     while True:
         try:
-            job = job_registry.create("auto_ingest_mqtt", "Ascolto MQTT automatico e refresh snapshot.")
+            job = job_registry.create("auto_ingest_mqtt", "Ascolto MQTT automatico e refresh snapshot.", settings=settings)
             result = await anyio.to_thread.run_sync(
                 job_registry.run,
                 job.job_id,
                 lambda: collect_live_and_refresh(settings, duration_seconds=max(duration, 1)),
+                settings,
             )
             if result.status == "completed":
                 service_factory().refresh()

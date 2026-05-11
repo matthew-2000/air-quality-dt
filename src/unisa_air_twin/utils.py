@@ -90,17 +90,6 @@ def read_json(path: str | Path, default: object | None = None) -> object:
     return json.loads(json_path.read_text(encoding="utf-8"))
 
 
-def write_schema_report(processed_dir: str | Path, warnings: list[dict]) -> None:
-    report_path = Path(processed_dir) / "schema_report.json"
-    existing = read_json(report_path, default={"warnings": []})
-    if not isinstance(existing, dict):
-        existing = {"warnings": []}
-    existing.setdefault("warnings", [])
-    existing["warnings"].extend(warnings)
-    existing["updated_at"] = utc_now_iso()
-    write_json(report_path, existing)
-
-
 def safe_to_parquet(df: pd.DataFrame, path: str | Path) -> None:
     output = Path(path)
     ensure_dir(output.parent)

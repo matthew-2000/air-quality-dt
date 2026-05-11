@@ -76,9 +76,9 @@ La sezione **Cosa fare ora** sintetizza:
 - zone da controllare;
 - possibili cause;
 - suggerimenti per posizionamento sensori;
-- spiegazione di confidence, anomalie, forecast, delta scenario e retention.
+- spiegazione di confidence, anomalie, forecast e delta scenario.
 
-Se mancano dati, la UI propone azioni interne: aggiornare snapshot, avviare job dati o creare uno scenario demo.
+Se mancano dati, la UI propone azioni interne: aggiornare snapshot, avviare job dati o creare uno scenario what-if salvato.
 
 ## Download dati
 

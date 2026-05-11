@@ -15,6 +15,7 @@ from unisa_air_twin.live_sensors import (
     export_operational_artifacts,
     write_real_sensor_geojson,
 )
+from unisa_air_twin.operational_store import read_job_run, read_job_runs, upsert_job_run
 from unisa_air_twin.osm import download_osm
 from unisa_air_twin.zones import ensure_twin_layers
 
@@ -45,25 +46,39 @@ class JobRegistry:
         self._jobs: dict[str, JobRun] = {}
         self._lock = Lock()
 
-    def create(self, name: str, message: str | None = None) -> JobRun:
+    def create(self, name: str, message: str | None = None, settings: Settings | None = None) -> JobRun:
         job = JobRun(job_id=uuid4().hex, name=name, status="queued", started_at=utc_timestamp(), message=message)
         with self._lock:
             self._jobs[job.job_id] = job
+        if settings is not None:
+            upsert_job_run(settings, job.to_dict())
         return job
 
-    def get(self, job_id: str) -> JobRun | None:
+    def get(self, job_id: str, settings: Settings | None = None) -> JobRun | None:
         with self._lock:
-            return self._jobs.get(job_id)
+            job = self._jobs.get(job_id)
+        if job is not None:
+            return job
+        if settings is None:
+            return None
+        payload = read_job_run(settings, job_id)
+        return JobRun(**payload) if payload else None
 
-    def list(self, limit: int = 20) -> list[JobRun]:
+    def list(self, limit: int = 20, settings: Settings | None = None) -> list[JobRun]:
+        if settings is not None:
+            persisted = [JobRun(**payload) for payload in read_job_runs(settings, limit=limit)]
+            if persisted:
+                return persisted
         with self._lock:
             jobs = list(self._jobs.values())
         return sorted(jobs, key=lambda job: job.started_at, reverse=True)[:limit]
 
-    def run(self, job_id: str, task: Callable[[], dict[str, Any]]) -> JobRun:
+    def run(self, job_id: str, task: Callable[[], dict[str, Any]], settings: Settings | None = None) -> JobRun:
         with self._lock:
             job = self._jobs[job_id]
             job.status = "running"
+        if settings is not None:
+            upsert_job_run(settings, job.to_dict())
         try:
             result = task()
         except Exception as exc:
@@ -71,11 +86,15 @@ class JobRegistry:
                 job.status = "failed"
                 job.finished_at = utc_timestamp()
                 job.error = str(exc)
+            if settings is not None:
+                upsert_job_run(settings, job.to_dict())
             return job
         with self._lock:
             job.status = "completed"
             job.finished_at = utc_timestamp()
             job.result = result
+        if settings is not None:
+            upsert_job_run(settings, job.to_dict())
         return job
 
 

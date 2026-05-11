@@ -13,6 +13,7 @@ from unisa_air_twin.live_sensors import (
     build_realtime_dataset,
     load_sensor_catalog,
 )
+from unisa_air_twin.operational_store import read_snapshots
 
 
 def test_live_sensors_builds_real_sensor_rows(tmp_path) -> None:
@@ -46,9 +47,11 @@ def test_live_sensors_builds_real_sensor_rows(tmp_path) -> None:
 
     sensors = load_sensor_catalog(settings)
     observations = build_realtime_dataset(settings)
+    persisted_snapshots = read_snapshots(settings)
 
     assert len(sensors) == 1
     assert set(observations["pollutant"]) == {"pm1", "pm25", "pm10", "voc_index"}
+    assert set(persisted_snapshots["pollutant"]) == {"pm1", "pm25", "pm10", "voc_index"}
     assert observations["is_real"].eq(True).all()
     assert (processed_dir / "campus_real_sensors.geojson").exists()
 

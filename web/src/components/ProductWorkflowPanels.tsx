@@ -9,12 +9,11 @@ import {
   HeartPulse,
   History,
   Save,
-  Settings,
   SlidersHorizontal,
   Sparkles,
   Wind,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { getJson, postJson, requestMessage } from "../api";
 import { ForecastBandChart } from "./Charts";
 import { formatDateTime, formatNumber, formatPercent, pollutantLabels } from "../format";
@@ -46,7 +45,7 @@ function scenarioLabel(id: string) {
 
 function statusTone(status: string) {
   if (["ok", "live", "available", "scheduled"].includes(status)) return "good";
-  if (["running", "queued", "stale", "unknown"].includes(status)) return "neutral";
+  if (["running", "queued", "stale", "unknown", "manual"].includes(status)) return "neutral";
   return "warn";
 }
 
@@ -152,7 +151,6 @@ function ForecastDecisionPanel({ pollutant, timestamp }: { pollutant: string; ti
           <ProductTooltip label="Anomalia">Misura inattesa: picco, drift, dato mancante o arrivo in ritardo.</ProductTooltip>
           <ProductTooltip label="Forecast">Stima breve termine utile per decidere ora, non previsione meteo lunga.</ProductTooltip>
           <ProductTooltip label="Delta scenario">Differenza tra baseline reale e snapshot simulato non distruttivo.</ProductTooltip>
-          <ProductTooltip label="Retention">Tempo di conservazione dati prima di cleanup programmato.</ProductTooltip>
         </div>
       </article>
     </section>
@@ -326,9 +324,6 @@ function ScenarioStudio({ pollutant, timestamp }: { pollutant: string; timestamp
 
 function DataCenterSettings({ summary }: { summary: Summary | null }) {
   const [health, setHealth] = useState<OperationalHealthPayload | null>(null);
-  const [refreshRate, setRefreshRate] = useState(30);
-  const [retention, setRetention] = useState(30);
-  const [aqiThreshold, setAqiThreshold] = useState(35);
 
   useEffect(() => {
     getJson<OperationalHealthPayload>("/api/ops/health")
@@ -337,7 +332,8 @@ function DataCenterSettings({ summary }: { summary: Summary | null }) {
   }, [summary?.latest_received_at]);
 
   const services = health?.services ?? [];
-  const exportHref = useMemo(() => `/api/export/observations?format=csv`, []);
+  const exportHref = "/api/export/observations?format=csv";
+  const latestIngest = health?.backup.last_backup ?? summary?.ingestion?.generated_at ?? null;
 
   return (
     <section className="admin-grid" id="settings">
@@ -367,29 +363,33 @@ function DataCenterSettings({ summary }: { summary: Summary | null }) {
       <article className="panel settings-panel">
         <div className="panel-head">
           <div>
-            <span>Settings/Admin</span>
-            <h2>Controlli operativi</h2>
+            <span>Operatività</span>
+            <h2>Configurazione reale</h2>
           </div>
-          <Settings size={18} />
+          <SlidersHorizontal size={18} />
         </div>
         <div className="settings-grid">
-          <label>
-            <span>Refresh dashboard</span>
-            <input type="number" min="10" max="300" value={refreshRate} onChange={(event) => setRefreshRate(Number(event.target.value))} />
-          </label>
-          <label>
-            <span>Retention dati giorni</span>
-            <input type="number" min="1" max="365" value={retention} onChange={(event) => setRetention(Number(event.target.value))} />
-          </label>
-          <label>
-            <span>Soglia alert AQI</span>
-            <input type="number" min="1" max="500" value={aqiThreshold} onChange={(event) => setAqiThreshold(Number(event.target.value))} />
-          </label>
+          <div>
+            <span>MQTT</span>
+            <strong>{summary?.live_feed?.configured ? "Configurato" : "Da configurare"}</strong>
+          </div>
+          <div>
+            <span>Ultimo ingest</span>
+            <strong>{formatDateTime(latestIngest)}</strong>
+          </div>
+          <div>
+            <span>Store operativo</span>
+            <strong>{services.some((service) => service.name === "database" && service.status === "ok") ? "SQLite attivo" : "Non verificato"}</strong>
+          </div>
+          <div>
+            <span>Backup</span>
+            <strong>{health?.backup.status === "manual" ? "Manuale" : health?.backup.status ?? "Non configurato"}</strong>
+          </div>
         </div>
         <div className="settings-summary">
-          <span>MQTT: {summary?.live_feed?.configured ? "configurato" : "da configurare"}</span>
-          <span>Scheduler: ingest, export, cleanup, forecast, backup</span>
-          <span>Backup: retention {health?.backup.retention_days ?? retention} giorni</span>
+          <span>Job: persistenti nello store operativo</span>
+          <span>Scenari: run salvati in SQLite</span>
+          <span>Backup: {health?.backup.restore_test === "not_configured" ? "restore test non configurato" : health?.backup.restore_test ?? "n/d"}</span>
         </div>
       </article>
 
@@ -415,7 +415,7 @@ function DataCenterSettings({ summary }: { summary: Summary | null }) {
             Raw MQTT CSV
           </a>
         </div>
-        <p className="method-note">Export, job, backup e health sono accessibili da dashboard: niente terminale per flusso utente.</p>
+        <p className="method-note">Export, job e health sono accessibili da dashboard. Backup resta procedura operativa esterna, non automatizzata.</p>
       </article>
     </section>
   );

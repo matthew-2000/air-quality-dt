@@ -1087,7 +1087,7 @@ function App() {
               <i />
             </div>
             {error ? (
-              <p>{error}. Riprova l'aggiornamento dalla dashboard oppure passa in modalità demo con dati simulati.</p>
+              <p>{error}. Riprova l'aggiornamento dalla dashboard o verifica API, store operativo e configurazione MQTT.</p>
             ) : (
               <p>{loadingCopy}</p>
             )}

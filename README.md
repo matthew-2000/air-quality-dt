@@ -69,7 +69,7 @@ Il flusso prodotto non richiede comandi terminale per l'utente finale. La dashbo
 - `POST /api/scenarios/run`: crea un run what-if salvato senza modificare osservazioni reali.
 - `GET /api/scenarios/runs`: storico run salvati.
 - `GET /api/decision-support`: alert, spiegazioni e "cosa fare ora".
-- `GET /api/ops/health`: stato API, DB, MQTT, jobs, stream, export e backup.
+- `GET /api/ops/health`: stato API, DB, MQTT, jobs, stream, export e backup manuale/non configurato.
 
 Gli script in `scripts/` restano utility di sviluppo e compatibilita', ma non sono il percorso utente primario.
 

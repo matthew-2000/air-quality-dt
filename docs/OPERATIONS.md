@@ -79,18 +79,19 @@ Controlla:
 - jobs;
 - stream SSE;
 - export;
-- backup/retention.
+- stato backup manuale.
 
 La stessa informazione appare nella sezione **Health dashboard**.
 
-## Backup e retention
+## Backup operativo
 
 Il volume `./data:/app/data` contiene store operativo, raw e processed artifacts. Backup minimo:
 
 1. snapshot periodico della directory `data/`;
-2. retention coerente con setting dashboard;
-3. restore test su ambiente non produttivo;
-4. verifica `GET /api/health` e apertura dashboard.
+2. restore test su ambiente non produttivo;
+3. verifica `GET /api/health` e apertura dashboard.
+
+Nota: non esiste ancora un job automatico di backup/retention. La dashboard mostra lo stato come manuale/non configurato per non dichiarare automazioni assenti.
 
 ## Troubleshooting
 

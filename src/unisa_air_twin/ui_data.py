@@ -30,6 +30,8 @@ from unisa_air_twin.operational_store import (
     read_observations,
     read_raw_message_count,
     read_sensors,
+    read_snapshots,
+    replace_snapshots,
 )
 from unisa_air_twin.storage import geojson_points_to_frame, read_geojson
 from unisa_air_twin.utils import read_json
@@ -115,7 +117,6 @@ class TwinDataService:
         if self._static_loaded is not None:
             return self._static_loaded
         stations = pd.DataFrame()
-        schema_report = read_json(self.settings.processed_dir / "schema_report.json", default={"warnings": []})
         layers = {
             "buildings": read_geojson(self.settings.processed_dir / "campus_buildings.geojson"),
             "roads": read_geojson(self.settings.processed_dir / "campus_roads.geojson"),
@@ -126,7 +127,7 @@ class TwinDataService:
         }
         self._static_loaded = {
             "stations": stations,
-            "schema_report": schema_report if isinstance(schema_report, dict) else {"warnings": []},
+            "warnings": [],
             "layers": layers,
         }
         return self._static_loaded
@@ -149,7 +150,10 @@ class TwinDataService:
         observations = attach_zones(observations, self._load_static_data()["layers"]["zones"])
         observations = annotate_quality(observations)
 
-        estimates = build_operational_snapshots(self.settings, observations)
+        estimates = read_snapshots(self.settings)
+        if estimates.empty and not observations.empty:
+            estimates = build_operational_snapshots(self.settings, observations)
+            replace_snapshots(self.settings, estimates)
         if "timestamp" in estimates.columns:
             estimates["timestamp"] = pd.to_datetime(estimates["timestamp"], errors="coerce")
         if "measured_at" in estimates.columns:
@@ -256,7 +260,7 @@ class TwinDataService:
             "ingestion": ingestion,
             "live_feed": live_feed,
             "data_sources": ingestion.get("sources") if isinstance(ingestion.get("sources"), list) else read_source_statuses(self.settings),
-            "warnings": data["schema_report"].get("warnings", []),
+            "warnings": data["warnings"],
             "mode": "real_only",
         }
 

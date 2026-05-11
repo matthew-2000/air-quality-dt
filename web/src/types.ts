@@ -306,5 +306,5 @@ export type DecisionSupportPayload = {
 
 export type OperationalHealthPayload = {
   services: Array<{ name: string; status: string; detail?: string | null }>;
-  backup: { status: string; retention_days: number; restore_test: string; last_backup?: string | null };
+  backup: { status: string; restore_test: string; last_backup?: string | null };
 };

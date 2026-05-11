@@ -22,6 +22,7 @@ from unisa_air_twin.operational_store import (
     read_raw_message_count,
     replace_observations,
     replace_sensors,
+    replace_snapshots,
     upsert_observations,
     write_ingestion_run,
     write_metadata,
@@ -430,6 +431,7 @@ def build_realtime_dataset(settings: Settings) -> pd.DataFrame:
     replace_sensors(settings, sensors)
     replace_observations(settings, observations)
     snapshot_estimates = build_operational_snapshots(settings, observations)
+    replace_snapshots(settings, snapshot_estimates)
     write_table(observations, settings.processed_dir / "real_sensor_observations.parquet")
     write_table(snapshot_estimates, settings.processed_dir / "campus_air_quality_estimates.parquet")
     bucket_minutes, freshness_minutes = _snapshot_settings(settings)
@@ -464,6 +466,7 @@ def export_operational_artifacts(settings: Settings) -> pd.DataFrame:
         observations["timestamp"] = pd.to_datetime(observations["timestamp"], errors="coerce")
         observations["received_at"] = pd.to_datetime(observations["received_at"], errors="coerce")
     snapshot_estimates = build_operational_snapshots(settings, observations)
+    replace_snapshots(settings, snapshot_estimates)
     write_table(observations, settings.processed_dir / "real_sensor_observations.parquet")
     write_table(snapshot_estimates, settings.processed_dir / "campus_air_quality_estimates.parquet")
     bucket_minutes, freshness_minutes = _snapshot_settings(settings)

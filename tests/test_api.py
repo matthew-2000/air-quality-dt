@@ -7,6 +7,17 @@ import pandas as pd
 from fastapi.testclient import TestClient
 
 import api.main as api_main
+from unisa_air_twin.config import load_settings
+
+
+def isolated_settings(tmp_path):
+    settings = load_settings()
+    settings.raw_dir = tmp_path / "raw"
+    settings.processed_dir = tmp_path / "processed"
+    settings.raw_dir.mkdir()
+    settings.processed_dir.mkdir()
+    settings.live_sensors["operational"] = {"db_path": str(settings.processed_dir / "realtime_operational.db")}
+    return settings
 
 
 class FakeTwinService:
@@ -174,7 +185,9 @@ def test_stream_emits_connected_event(monkeypatch) -> None:
     assert payload["live_feed_status"] == "unknown"
 
 
-def test_refresh_job_contract(monkeypatch) -> None:
+def test_refresh_job_contract(monkeypatch, tmp_path) -> None:
+    settings = isolated_settings(tmp_path)
+    monkeypatch.setattr(api_main, "load_settings", lambda: settings)
     monkeypatch.setattr(api_main, "get_twin_service", lambda: FakeTwinService())
     monkeypatch.setattr(api_main, "refresh_operational_snapshots", lambda _settings: {"snapshot_rows": 3})
     client = TestClient(api_main.app)
@@ -191,7 +204,9 @@ def test_refresh_job_contract(monkeypatch) -> None:
     assert detail.json()["result"].get("snapshot_rows") == 3
 
 
-def test_live_ingest_job_contract(monkeypatch) -> None:
+def test_live_ingest_job_contract(monkeypatch, tmp_path) -> None:
+    settings = isolated_settings(tmp_path)
+    monkeypatch.setattr(api_main, "load_settings", lambda: settings)
     monkeypatch.setattr(api_main, "get_twin_service", lambda: FakeTwinService())
     monkeypatch.setattr(
         api_main,
@@ -278,7 +293,9 @@ def test_frontend_routes_serve_built_assets(monkeypatch, tmp_path) -> None:
     assert "demo app" in spa_response.text
 
 
-def test_scenario_run_contract(monkeypatch) -> None:
+def test_scenario_run_contract(monkeypatch, tmp_path) -> None:
+    settings = isolated_settings(tmp_path)
+    monkeypatch.setattr(api_main, "load_settings", lambda: settings)
     monkeypatch.setattr(api_main, "get_twin_service", lambda: FakeTwinService())
     client = TestClient(api_main.app)
 
@@ -296,7 +313,9 @@ def test_scenario_run_contract(monkeypatch) -> None:
     assert runs.json()["runs"]
 
 
-def test_decision_support_and_health_contract(monkeypatch) -> None:
+def test_decision_support_and_health_contract(monkeypatch, tmp_path) -> None:
+    settings = isolated_settings(tmp_path)
+    monkeypatch.setattr(api_main, "load_settings", lambda: settings)
     monkeypatch.setattr(api_main, "get_twin_service", lambda: FakeTwinService())
     client = TestClient(api_main.app)
 

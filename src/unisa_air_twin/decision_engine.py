@@ -9,6 +9,8 @@ from uuid import uuid4
 import pandas as pd
 
 from unisa_air_twin.analytics import zone_summary
+from unisa_air_twin.config import Settings
+from unisa_air_twin.operational_store import read_scenario_runs, write_scenario_run
 
 SCENARIO_DELTAS: dict[str, dict[str, float]] = {
     "traffic_increase": {"pm10": 0.16, "pm25": 0.12, "pm1": 0.08, "no2": 0.18},
@@ -119,11 +121,17 @@ class ScenarioRunStore:
         self._runs: dict[str, ScenarioRun] = {}
         self._lock = Lock()
 
-    def add(self, run: ScenarioRun) -> None:
+    def add(self, run: ScenarioRun, settings: Settings | None = None) -> None:
         with self._lock:
             self._runs[run.run_id] = run
+        if settings is not None:
+            write_scenario_run(settings, run.to_dict())
 
-    def list(self, limit: int = 20) -> list[dict[str, Any]]:
+    def list(self, limit: int = 20, settings: Settings | None = None) -> list[dict[str, Any]]:
+        if settings is not None:
+            persisted = read_scenario_runs(settings, limit=limit)
+            if persisted:
+                return persisted
         with self._lock:
             runs = list(self._runs.values())
         return [run.to_dict() for run in sorted(runs, key=lambda item: item.created_at, reverse=True)[:limit]]
@@ -141,6 +149,7 @@ def run_scenario(
     intensity: float,
     name: str | None = None,
     parameters: dict[str, Any] | None = None,
+    settings: Settings | None = None,
 ) -> dict[str, Any]:
     factor = max(min(float(intensity), 2.0), 0.0)
     effects = SCENARIO_DELTAS.get(scenario_type, {})
@@ -195,7 +204,7 @@ def run_scenario(
         parameters=parameters or {},
         output=output,
     )
-    scenario_store.add(run)
+    scenario_store.add(run, settings=settings)
     return run.to_dict()
 
 
@@ -274,9 +283,8 @@ def health_payload(summary: dict[str, Any], jobs: list[dict[str, Any]]) -> dict[
             {"name": "Export", "status": "ok", "detail": "CSV/JSON via dashboard"},
         ],
         "backup": {
-            "status": "scheduled",
-            "retention_days": 30,
-            "restore_test": "manuale guidato",
+            "status": "manual",
+            "restore_test": "not_configured",
             "last_backup": summary.get("ingestion", {}).get("generated_at"),
         },
     }
