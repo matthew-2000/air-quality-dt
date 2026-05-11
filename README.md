@@ -100,6 +100,7 @@ Scelta operativa consigliata per demo:
 
 - `UNISA_AQDT_AUTO_INGEST=false` su Render per evitare dipendenze live da MQTT;
 - abilita le variabili `UNISA_MQTT_*` solo se vuoi davvero mostrare ingest live;
+- per il live su Render free usa il job manuale **Ascolta live 10s** dalla dashboard invece di un loop permanente;
 - ogni redeploy/ripartenza riparte dal dataset demo incluso nell'immagine, quindi lo stato resta coerente anche senza disco persistente.
 
 ### Deploy demo/produzione locale
@@ -184,6 +185,7 @@ La dashboard resta il centro operativo: i job manuali servono solo per refresh f
 
 - MQTT non e' uno storico completo: ricevi i messaggi mentre il client e' connesso, piu' eventuali retained.
 - Ingest MQTT automatico: `UNISA_AQDT_AUTO_INGEST=true`, durata ciclo `UNISA_AQDT_AUTO_INGEST_DURATION`, pausa `UNISA_AQDT_AUTO_INGEST_INTERVAL`.
+- Su Render free e' consigliato tenere `UNISA_AQDT_AUTO_INGEST=false` e usare ingest manuale on-demand dalla dashboard.
 - Il backend usa lo store SQLite operativo come sorgente primaria per la dashboard.
 - Le fonti esterne gratuite sono cache-first: un errore rete non blocca la dashboard se esiste cache locale.
 - Gli export CSV/JSON sono generati dall'API a partire dallo store operativo.

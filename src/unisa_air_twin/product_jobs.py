@@ -80,6 +80,7 @@ class JobRegistry:
 
 
 job_registry = JobRegistry()
+_LIVE_INGEST_LOCK = Lock()
 
 
 def prepare_context_layers(settings: Settings, force: bool = False) -> dict[str, Any]:
@@ -127,3 +128,20 @@ def collect_live_and_refresh(
         "mqtt_messages": int(messages),
         "snapshot_rows": int(len(snapshots)),
     }
+
+
+def collect_live_once(
+    settings: Settings,
+    duration_seconds: int = 10,
+    max_messages: int | None = 25,
+) -> dict[str, Any]:
+    if not _LIVE_INGEST_LOCK.acquire(blocking=False):
+        raise RuntimeError("Una sessione live e' gia' in corso. Attendi la fine del job attivo.")
+    try:
+        return collect_live_and_refresh(
+            settings,
+            duration_seconds=max(1, int(duration_seconds)),
+            max_messages=max_messages,
+        )
+    finally:
+        _LIVE_INGEST_LOCK.release()

@@ -12,6 +12,11 @@ type JobAction = {
 
 const actions: JobAction[] = [
   {
+    label: "Ascolta live 10s",
+    description: "Acquisisce MQTT on-demand e aggiorna gli snapshot senza loop permanente.",
+    endpoint: "/api/jobs/live-ingest?duration_seconds=10&max_messages=25",
+  },
+  {
     label: "Aggiorna snapshot",
     description: "Ricostruisce la vista operativa dai dati gia' acquisiti.",
     endpoint: "/api/jobs/refresh",

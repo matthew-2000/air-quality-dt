@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -11,7 +10,6 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 
-from api.autostart import auto_ingest_loop
 from api.events import snapshot_events
 from api.streaming import summary_stream
 from unisa_air_twin.api_schemas import (
@@ -42,6 +40,7 @@ from unisa_air_twin.decision_engine import (
 from unisa_air_twin.external_sources import read_source_statuses
 from unisa_air_twin.operational_store import read_observations, read_raw_messages, read_sensors
 from unisa_air_twin.product_jobs import (
+    collect_live_once,
     job_registry,
     prepare_context_layers,
     rebuild_operational_dataset,
@@ -51,21 +50,10 @@ from unisa_air_twin.product_jobs import (
 from unisa_air_twin.ui_data import get_twin_service
 from unisa_air_twin.utils import project_path
 
-
-@asynccontextmanager
-async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    settings = load_settings()
-    async with anyio.create_task_group() as task_group:
-        task_group.start_soon(auto_ingest_loop, settings, get_twin_service, snapshot_events)
-        yield
-        task_group.cancel_scope.cancel()
-
-
 app = FastAPI(
     title="UNISA Air Quality Digital Twin API",
     version="0.1.0",
     description="Operational API for real-only UNISA sensor snapshots, raw histories, and campus context layers.",
-    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -165,6 +153,28 @@ async def start_enrichment_job(
 ) -> JobRunResponse:
     job = job_registry.create("refresh_external_sources", "Aggiornamento fonti gratuite e arricchimento dataset operativo.")
     background_tasks.add_task(_run_job_and_notify, job.job_id, lambda: refresh_external_sources(load_settings(), force=force))
+    return job.to_dict()
+
+
+@app.post("/api/jobs/live-ingest", response_model=JobRunResponse, status_code=202)
+async def start_live_ingest_job(
+    background_tasks: BackgroundTasks,
+    duration_seconds: Annotated[int, Query(ge=1, le=60)] = 10,
+    max_messages: Annotated[int | None, Query(ge=1, le=200)] = 25,
+) -> JobRunResponse:
+    job = job_registry.create(
+        "live_ingest_once",
+        f"Ascolto MQTT manuale per {duration_seconds}s e refresh snapshot operativo.",
+    )
+    background_tasks.add_task(
+        _run_job_and_notify,
+        job.job_id,
+        lambda: collect_live_once(
+            load_settings(),
+            duration_seconds=duration_seconds,
+            max_messages=max_messages,
+        ),
+    )
     return job.to_dict()
 
 

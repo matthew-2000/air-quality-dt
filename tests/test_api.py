@@ -191,6 +191,30 @@ def test_refresh_job_contract(monkeypatch) -> None:
     assert detail.json()["result"].get("snapshot_rows") == 3
 
 
+def test_live_ingest_job_contract(monkeypatch) -> None:
+    monkeypatch.setattr(api_main, "get_twin_service", lambda: FakeTwinService())
+    monkeypatch.setattr(
+        api_main,
+        "collect_live_once",
+        lambda _settings, duration_seconds, max_messages: {
+            "mqtt_messages": max_messages,
+            "snapshot_rows": duration_seconds,
+        },
+    )
+    client = TestClient(api_main.app)
+
+    response = client.post("/api/jobs/live-ingest?duration_seconds=7&max_messages=9")
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["name"] == "live_ingest_once"
+    assert payload["status"] in {"queued", "running", "completed"}
+
+    detail = client.get(f"/api/jobs/{payload['job_id']}")
+    assert detail.status_code == 200
+    assert detail.json()["result"] == {"mqtt_messages": 9, "snapshot_rows": 7}
+
+
 def test_export_observations_contract(monkeypatch) -> None:
     monkeypatch.setattr(
         api_main,

@@ -31,8 +31,16 @@ Per demo affidabili su Render conviene usare un solo Web Service Docker:
 - FastAPI serve sia `/api/*` sia la dashboard SPA;
 - `data/` viene incluso nell'immagine come dataset demo seed;
 - `render.yaml` imposta `UNISA_AQDT_AUTO_INGEST=false` per evitare failure o rumore quando MQTT non e' configurato.
+- il live MQTT e' esposto come job manuale one-shot, pensato per demo su macchine con poche risorse.
 
 Con questa configurazione, un restart o un redeploy di Render riparte sempre da uno stato dimostrabile e consistente, pur restando su filesystem effimero.
+
+Per mostrare il live senza destabilizzare il web service:
+
+1. configura `UNISA_MQTT_*` nel servizio Render;
+2. lascia `UNISA_AQDT_AUTO_INGEST=false`;
+3. dalla sezione **Gestione dati** usa il comando **Ascolta live 10s**;
+4. attendi il completamento del job e il refresh della dashboard.
 
 ## Configurazione
 
