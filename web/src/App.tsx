@@ -307,6 +307,66 @@ function MapLegend({
   );
 }
 
+function OperationalContextBar({
+  summary,
+  pollutant,
+  timestamp,
+  timestamps,
+  selectedCoverage,
+  activePageLabel,
+  streamStatus,
+  onPollutantChange,
+  onTimestampChange,
+}: {
+  summary: Summary | null;
+  pollutant: string;
+  timestamp: string | null;
+  timestamps: string[];
+  selectedCoverage: Summary["coverage_by_pollutant"][number] | null;
+  activePageLabel: string;
+  streamStatus: StreamStatus;
+  onPollutantChange: (value: string) => void;
+  onTimestampChange: (value: string) => void;
+}) {
+  return (
+    <section className="context-bar" aria-label="Contesto operativo corrente">
+      <div className="context-summary">
+        <span>Vista</span>
+        <strong>{activePageLabel}</strong>
+      </div>
+      <label>
+        <span>Inquinante</span>
+        <select value={pollutant} onChange={(event) => onPollutantChange(event.target.value)} disabled={!summary?.pollutants.length}>
+          {(summary?.pollutants.length ? summary.pollutants : [pollutant]).map((item) => (
+            <option key={item} value={item}>
+              {pollutantLabels[item] ?? item.toUpperCase()}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        <span>Snapshot</span>
+        <select value={timestamp ?? ""} onChange={(event) => onTimestampChange(event.target.value)} disabled={!timestamps.length}>
+          {timestamps.map((item) => (
+            <option key={item} value={item}>
+              {formatDateTime(item)}
+            </option>
+          ))}
+          {!timestamps.length ? <option value="">n/d</option> : null}
+        </select>
+      </label>
+      <div className="context-summary">
+        <span>Copertura</span>
+        <strong>{selectedCoverage ? coverageText(selectedCoverage.active_sensors, selectedCoverage.capable_sensors) : coverageText(summary?.active_sensors, summary?.capable_sensors)}</strong>
+      </div>
+      <div className="context-summary">
+        <span>Stream</span>
+        <strong>{streamStatusLabel(streamStatus)}</strong>
+      </div>
+    </section>
+  );
+}
+
 function App() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [timestamps, setTimestamps] = useState<string[]>([]);
@@ -557,6 +617,7 @@ function App() {
       ? "Costruzione della mappa e dei layer campus."
       : "Preparazione del dettaglio sensore.";
   const liveWarning = liveFeedMessage(summary);
+  const activePageLabel = pageItems.find((item) => item.id === activePage)?.label ?? "Overview";
 
   return (
     <main className="app-shell" data-testid="air-twin-cockpit" aria-busy={isLoading}>
@@ -632,6 +693,18 @@ function App() {
 
         {dashboardReady ? (
           <>
+        <OperationalContextBar
+          summary={summary}
+          pollutant={pollutant}
+          timestamp={timestamp}
+          timestamps={timestamps}
+          selectedCoverage={selectedCoverage}
+          activePageLabel={activePageLabel}
+          streamStatus={streamStatus}
+          onPollutantChange={setPollutant}
+          onTimestampChange={setTimestamp}
+        />
+
         {isLoading ? (
           <div className="sync-banner" role="status">
             <RefreshCcw size={15} className="spin-icon" />
@@ -686,7 +759,7 @@ function App() {
 
         {error ? <div className="error-banner" role="alert">{error}</div> : null}
 
-        {activePage === "overview" || activePage === "map" ? <section className="operations-grid">
+        {activePage === "map" ? <section className="operations-grid">
           <article className="panel coverage-panel">
             <div className="panel-head">
               <div>
@@ -820,7 +893,7 @@ function App() {
           </article>
         </section> : null}
 
-        {activePage === "overview" || activePage === "sensors" ? <section className="detail-grid">
+        {activePage === "sensors" ? <section className="detail-grid">
           <article className="panel sensor-panel">
             <div className="panel-head">
               <div>
@@ -928,7 +1001,7 @@ function App() {
           </article>
         </section> : null}
 
-        {activePage === "overview" || activePage === "insights" ? <TwinAnalyticsPanel analytics={analytics} /> : null}
+        {activePage === "insights" ? <TwinAnalyticsPanel analytics={analytics} /> : null}
 
         {activePage === "overview" ? (
           <ProductWorkflowPanels pollutant={pollutant} timestamp={timestamp} summary={summary} sections={["insights"]} />
