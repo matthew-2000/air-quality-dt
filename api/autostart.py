@@ -31,6 +31,17 @@ def _int_env(name: str, default: int) -> int:
         return default
 
 
+def _optional_positive_int_env(name: str, default: int | None) -> int | None:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+    except ValueError:
+        return default
+    return parsed if parsed > 0 else None
+
+
 def _mqtt_configured(settings: Settings) -> bool:
     broker = settings.live_sensors.get("broker", {})
     keys = [
@@ -53,6 +64,7 @@ async def auto_ingest_loop(
 
     duration = _int_env("UNISA_AQDT_AUTO_INGEST_DURATION", 30)
     interval = _int_env("UNISA_AQDT_AUTO_INGEST_INTERVAL", 10)
+    max_messages = _optional_positive_int_env("UNISA_AQDT_AUTO_INGEST_MAX_MESSAGES", 25)
     if not _mqtt_configured(settings):
         return
 
@@ -62,12 +74,18 @@ async def auto_ingest_loop(
             result = await anyio.to_thread.run_sync(
                 job_registry.run,
                 job.job_id,
-                lambda: collect_live_and_refresh(settings, duration_seconds=max(duration, 1)),
+                lambda: collect_live_and_refresh(
+                    settings,
+                    duration_seconds=max(duration, 1),
+                    max_messages=max_messages,
+                ),
                 settings,
             )
             if result.status == "completed":
                 service_factory().refresh()
                 await events.notify()
+            elif result.status == "failed":
+                logger.warning("Automatic MQTT ingest job failed: %s", result.error or "unknown error")
         except Exception:
             logger.exception("Automatic MQTT ingest loop failed")
         await anyio.sleep(max(interval, 1))
