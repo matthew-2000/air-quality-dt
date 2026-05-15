@@ -48,7 +48,7 @@ export function TwinAnalyticsPanel({ analytics }: { analytics?: AnalyticsPayload
       <article className="panel analytics-panel">
         <div className="panel-head">
           <div>
-            <span>Twin analytics</span>
+            <span>Analytics operative</span>
             <h2>Qualità dato e zone</h2>
           </div>
           <small>{analytics?.timestamp ? `Snapshot ${formatTime(analytics.timestamp)}` : "Snapshot n/d"}</small>

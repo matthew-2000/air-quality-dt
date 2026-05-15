@@ -3,10 +3,8 @@ from __future__ import annotations
 import pandas as pd
 
 from unisa_air_twin.config import load_settings
-from unisa_air_twin.decision_engine import ScenarioRun, ScenarioRunStore
 from unisa_air_twin.operational_store import (
     read_job_run,
-    read_scenario_runs,
     read_sensor_observations,
     read_sensor_snapshot,
     read_sensor_timeseries,
@@ -43,29 +41,6 @@ def test_job_registry_persists_status_transitions(tmp_path) -> None:
     reloaded = JobRegistry().get(job.job_id, settings=settings)
     assert reloaded is not None
     assert reloaded.status == "completed"
-
-
-def test_scenario_store_persists_runs(tmp_path) -> None:
-    settings = isolated_settings(tmp_path)
-    store = ScenarioRunStore()
-    run = ScenarioRun(
-        run_id="scenario-1",
-        name="Riduzione traffico",
-        scenario_type="traffic_reduction",
-        pollutant="pm10",
-        intensity=1.0,
-        created_at="2026-05-11T10:00:00Z",
-        baseline_timestamp="2026-05-11T09:55:00",
-        parameters={"source": "test"},
-        output={"delta_mean": -2.5},
-    )
-
-    store.add(run, settings=settings)
-
-    persisted = read_scenario_runs(settings)
-    assert persisted[0]["run_id"] == "scenario-1"
-    assert persisted[0]["parameters"] == {"source": "test"}
-    assert persisted[0]["output"] == {"delta_mean": -2.5}
 
 
 def test_targeted_snapshot_queries_do_not_require_full_store_scan(tmp_path) -> None:

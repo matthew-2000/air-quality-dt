@@ -478,8 +478,7 @@ a:focus-visible,
 
 .operations-grid,
 .detail-grid,
-.provenance-grid,
-.twin-core-grid {
+.provenance-grid {
   display: grid;
   gap: 18px;
 }
@@ -493,10 +492,6 @@ a:focus-visible,
 }
 
 .provenance-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.twin-core-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
@@ -1347,103 +1342,20 @@ input {
   height: 160px;
 }
 
-.scenario-section,
-.decision-grid,
 .admin-grid {
   display: grid;
   gap: 18px;
 }
 
-.scenario-section {
-  grid-template-columns: minmax(320px, 0.95fr) minmax(360px, 1.1fr) minmax(260px, 0.8fr);
-}
-
-.decision-grid,
 .admin-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
-
-.scenario-type-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.scenario-type,
-.scenario-run {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  width: 100%;
-  min-height: 42px;
-  border: 1px solid rgba(67, 84, 69, 0.12);
-  border-radius: 14px;
-  background: rgba(255, 251, 245, 0.92);
-  color: var(--text);
-  cursor: pointer;
-}
-
-.scenario-type {
-  justify-content: flex-start;
-  padding: 10px 12px;
-}
-
-.scenario-type.active,
-.scenario-run.active {
-  border-color: rgba(79, 110, 77, 0.34);
-  background: rgba(223, 232, 218, 0.66);
-  color: var(--accent);
-}
-
-.range-control {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: center;
-  margin-top: 16px;
-}
-
-.range-control span {
-  grid-column: 1 / -1;
-  color: var(--muted);
-  font-size: 0.88rem;
-}
-
-.range-control input {
-  padding: 0;
-  accent-color: var(--accent);
-}
-
-.primary-action {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 9px;
-  width: 100%;
-  min-height: 46px;
-  margin-top: 16px;
-  border: 0;
-  border-radius: 14px;
-  background: var(--accent);
-  color: #f8f3ea;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.primary-action:disabled {
-  cursor: wait;
-  opacity: 0.62;
-}
-
-.scenario-kpis,
 .settings-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
-.scenario-kpis > div,
-.forecast-row,
 .alert-row,
 .health-row,
 .settings-grid > div {
@@ -1451,50 +1363,11 @@ input {
   border-radius: 16px;
   background: rgba(255, 251, 245, 0.9);
 }
-
-.scenario-kpis > div {
-  padding: 14px;
-}
-
-.scenario-kpis span,
 .settings-grid span,
 .method-note {
   color: var(--muted);
   font-size: 0.86rem;
 }
-
-.scenario-kpis strong {
-  display: block;
-  margin-top: 7px;
-  font-size: 1.25rem;
-}
-
-.driver-list,
-.settings-summary,
-.glossary-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 9px;
-  margin-top: 14px;
-}
-
-.driver-list span,
-.settings-summary span,
-.info-tooltip {
-  display: inline-flex;
-  align-items: center;
-  min-height: 34px;
-  padding: 7px 10px;
-  border-radius: 999px;
-  background: rgba(93, 120, 136, 0.1);
-  color: #435f69;
-  font-size: 0.84rem;
-  font-weight: 700;
-}
-
-.zone-delta-list,
-.scenario-run-list,
-.forecast-list,
 .action-list,
 .alert-list,
 .health-list,
@@ -1503,8 +1376,6 @@ input {
   gap: 10px;
   margin-top: 14px;
 }
-
-.zone-delta-list > div,
 .action-list > div {
   display: flex;
   justify-content: space-between;
@@ -1520,19 +1391,6 @@ input {
   color: var(--text);
 }
 
-.scenario-run {
-  display: grid;
-  gap: 4px;
-  text-align: left;
-  padding: 12px;
-}
-
-.scenario-run span {
-  color: var(--muted);
-  font-size: 0.82rem;
-}
-
-.forecast-row,
 .health-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(90px, auto) auto;
@@ -1541,7 +1399,6 @@ input {
   padding: 13px;
 }
 
-.forecast-row span,
 .health-row small,
 .alert-row span {
   color: var(--muted);
@@ -1663,11 +1520,8 @@ input {
   .operations-grid,
   .detail-grid,
   .provenance-grid,
-  .twin-core-grid,
   .analytics-grid,
-    .scenario-section,
-    .decision-grid,
-    .admin-grid {
+  .admin-grid {
     grid-template-columns: 1fr;
   }
 

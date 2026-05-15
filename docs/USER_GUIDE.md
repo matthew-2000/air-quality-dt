@@ -6,10 +6,7 @@ La dashboard mostra le misure reali piu' recenti dei sensori UNISA sul campus.
 
 - **Copertura per inquinante**: quanti sensori stanno contribuendo allo snapshot operativo.
 - **Mappa campus**: superficie interpolata, marker sensori e vista copertura.
-- **Twin analytics**: qualita' del dato, trend campus e riepilogo delle zone operative.
-- **Scenari**: simulazioni what-if salvabili che confrontano baseline reale e scenario senza cambiare i dati reali.
-- **Forecast**: previsione operativa a 30, 60 e 180 minuti con bande di incertezza e rischio stimato.
-- **Decision support**: alert, spiegazioni e azioni consigliate in linguaggio non tecnico.
+- **Analytics operative**: qualita' del dato, trend campus e riepilogo delle zone operative.
 - **Dettaglio sensore**: ultima misura disponibile, freschezza del dato e storico recente.
 - **Stato ingestione**: quanti dati sono disponibili e se il feed live e' attivo, stale o non configurato.
 - **Gestione dati**: operazioni per aggiornare contesto, ricostruire dataset e aggiornare snapshot senza usare terminale.
@@ -52,33 +49,16 @@ Per aggiornare i dati dalla UI usa **Gestione dati**:
 
 Quando un job cambia i dati, la dashboard ricarica summary, mappa, analytics e dettaglio.
 
-## Scenari what-if
+## Perimetro attuale
 
-Gli scenari non modificano osservazioni, snapshot o storico reale. Ogni simulazione crea un run salvato con:
+Per mantenere il cockpit affidabile, il progetto non espone piu':
 
-- baseline usata;
-- tipo scenario e intensita';
-- delta medio per inquinante;
-- variazione per zone;
-- confidence;
-- rischio stimato;
-- driver principali;
-- aree e sensori da monitorare.
+- scenari what-if;
+- forecast euristici;
+- decision support testuale;
+- pannelli "twin core" che simulano asset/state/validation senza un modello fisico abbastanza solido.
 
-Scenari disponibili: aumento traffico, riduzione traffico, evento campus, chiusura parcheggio, nuovo sensore, sensore offline, pioggia, vento, aumento verde e variazione finestra freschezza.
-
-## Decisioni operative
-
-La sezione **Cosa fare ora** sintetizza:
-
-- livello rischio previsto;
-- alert attivi;
-- zone da controllare;
-- possibili cause;
-- suggerimenti per posizionamento sensori;
-- spiegazione di confidence, anomalie, forecast e delta scenario.
-
-Se mancano dati, la UI propone azioni interne: aggiornare snapshot, avviare job dati o creare uno scenario what-if salvato.
+La dashboard resta focalizzata su dati osservati, snapshot operativi, analytics, ingestione, health ed export.
 
 ## Download dati
 

@@ -113,7 +113,7 @@ export function DataJobsPanel({ onDataChanged }: { onDataChanged: () => void }) 
       <div className="panel-head">
         <div>
           <span>Gestione dati</span>
-          <h2>Operazioni prodotto</h2>
+          <h2>Operazioni operative</h2>
         </div>
         <Database size={18} />
       </div>

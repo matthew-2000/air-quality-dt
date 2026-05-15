@@ -7,7 +7,14 @@ Oggi il prodotto attivo e supportato e' questo:
 - frontend React in `web/`
 - API FastAPI in `api/`
 - job dati, ingestione MQTT e store operativo in `src/unisa_air_twin/`
-- motore what-if non distruttivo, forecast breve termine e decision support via dashboard
+- snapshot operativi, analytics osservativi, mappa campus, health ed export
+
+Funzionalita' volutamente escluse dal perimetro attuale:
+
+- scenari what-if salvati;
+- forecast euristico breve termine;
+- decision support testuale basato su regole deboli;
+- registry asset/state/validation presentati come "twin core" senza modello fisico sufficiente.
 
 ## Requisiti
 
@@ -65,10 +72,6 @@ Il flusso prodotto non richiede comandi terminale per l'utente finale. La dashbo
 - `GET /api/jobs`: mostra stato, errori e risultato delle operazioni avviate.
 - `GET /api/sources`: mostra salute, cache e provenance delle fonti dati.
 - `GET /api/export/{observations|sensors|raw-messages}?format=csv|json`: scarica dati disponibili.
-- `GET /api/forecast`: previsioni operative 30/60/180 minuti.
-- `POST /api/scenarios/run`: crea un run what-if salvato senza modificare osservazioni reali.
-- `GET /api/scenarios/runs`: storico run salvati.
-- `GET /api/decision-support`: alert, spiegazioni e "cosa fare ora".
 - `GET /api/ops/health`: stato API, DB, MQTT, jobs, stream, export e backup manuale/non configurato.
 
 Gli script in `scripts/` restano utility di sviluppo e compatibilita', ma non sono il percorso utente primario.

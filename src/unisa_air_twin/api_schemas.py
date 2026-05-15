@@ -143,89 +143,8 @@ class AnalyticsResponse(BaseModel):
     trend: list[dict[str, Any]]
 
 
-class ForecastResponse(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    pollutant: str
-    timestamp: str | None = None
-    windows: list[dict[str, Any]]
-    critical_zones: list[dict[str, Any] | str] = []
-    method: str
-
-
-class ScenarioRunRequest(BaseModel):
-    name: str | None = None
-    scenario_type: str
-    pollutant: str
-    timestamp: str | None = None
-    intensity: float = Field(default=1.0, ge=0.0, le=2.0)
-    parameters: dict[str, Any] = Field(default_factory=dict)
-
-
-class ScenarioCatalogResponse(BaseModel):
-    scenarios: list[dict[str, Any]]
-
-
-class ScenarioRunResponse(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    run_id: str
-    name: str
-    scenario_type: str
-    pollutant: str
-    intensity: float
-    created_at: str
-    baseline_timestamp: str | None = None
-    parameters: dict[str, Any] = Field(default_factory=dict)
-    output: dict[str, Any]
-
-
-class ScenarioRunListResponse(BaseModel):
-    runs: list[ScenarioRunResponse]
-
-
-class DecisionSupportResponse(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    risk_level: str
-    what_to_do_now: list[str]
-    alerts: list[dict[str, Any]]
-    suggested_sensor_placement: list[str]
-    explanations: list[str]
-
-
 class OperationalHealthResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     services: list[dict[str, Any]]
     backup: dict[str, Any]
-
-
-class TwinAssetsResponse(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    assets: list[dict[str, Any]]
-    relationships: list[dict[str, Any]]
-    counts: dict[str, int]
-
-
-class TwinStateResponse(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    state_id: str
-    pollutant: str
-    timestamp: str | None = None
-    status: str
-    quality: dict[str, Any]
-    entities: dict[str, list[dict[str, Any]]]
-    gaps: list[dict[str, Any]]
-
-
-class TwinValidationResponse(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    pollutant: str
-    timestamp: str | None = None
-    status: str
-    metrics: dict[str, Any]
-    windows: list[dict[str, Any]]

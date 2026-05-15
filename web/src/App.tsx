@@ -36,10 +36,9 @@ import { SensorHistoryChart } from "./components/Charts";
 import { CoverageBar } from "./components/CoverageBar";
 import { DataJobsPanel } from "./components/DataJobsPanel";
 import { EmptyStatePanel } from "./components/EmptyStatePanel";
+import { OperationsPanel } from "./components/OperationsPanel";
 import { SummaryCard } from "./components/SummaryCard";
 import { TwinAnalyticsPanel } from "./components/TwinAnalyticsPanel";
-import { TwinCorePanel } from "./components/TwinCorePanel";
-import { ProductWorkflowPanels } from "./components/ProductWorkflowPanels";
 import { pageItems } from "./pages/pageConfig";
 import type { PageId } from "./pages/pageConfig";
 import type {
@@ -378,7 +377,7 @@ function App() {
   const [selectedSensorId, setSelectedSensorId] = useState<string | null>(null);
   const [layerVisibility, setLayerVisibility] = useState<LayerVisibility>(defaultLayers);
   const [mapView, setMapView] = useState<MapView>("surface");
-  const [activePage, setActivePage] = useState<PageId>("overview");
+  const [activePage, setActivePage] = useState<PageId>("map");
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
@@ -628,8 +627,8 @@ function App() {
               <Leaf size={18} />
             </div>
             <div>
-              <strong>UNISA</strong>
-              <span>Air Quality Digital Twin</span>
+            <strong>UNISA</strong>
+            <span>Air Quality Operations</span>
             </div>
           </div>
 
@@ -658,7 +657,7 @@ function App() {
           <div className="rail-card rail-card-overview">
             <span>Panoramica</span>
             <strong>Monitoraggio campus</strong>
-            <p>Copertura sensori, qualità dell'aria, dettaglio puntuale e storico operativo.</p>
+            <p>Snapshot sensori, mappa campus, storico e stato operativo reale.</p>
           </div>
 
           <div className="rail-card rail-card-status">
@@ -680,7 +679,7 @@ function App() {
           <div className="hero-copy">
             <span className="page-kicker">{pageItems.find((item) => item.id === activePage)?.label}</span>
             <h1>Air Quality Operations</h1>
-            <p>Stato campus, rischio corrente, dati live e azioni consigliate in una vista leggibile.</p>
+            <p>Monitoraggio reale del campus: osservazioni, copertura rete, trend e ingestione.</p>
           </div>
           <div className="hero-meta">
             <span>{summary?.source ?? "UNISA AQDT"}</span>
@@ -717,10 +716,10 @@ function App() {
         {!hasObservations && summary ? (
           <>
             <EmptyStatePanel summary={summary} observationRows={observationRows} />
-            <ProductWorkflowPanels pollutant={pollutant} timestamp={timestamp} summary={summary} />
             <section className="provenance-grid" id="provenance">
               <DataJobsPanel onDataChanged={handleDataChanged} />
             </section>
+            <OperationsPanel summary={summary} />
           </>
         ) : (
           <>
@@ -1003,22 +1002,6 @@ function App() {
 
         {activePage === "insights" ? <TwinAnalyticsPanel analytics={analytics} /> : null}
 
-        {activePage === "overview" ? (
-          <ProductWorkflowPanels pollutant={pollutant} timestamp={timestamp} summary={summary} sections={["insights"]} />
-        ) : null}
-        {activePage === "overview" || activePage === "twin-core" ? (
-          <TwinCorePanel pollutant={pollutant} timestamp={timestamp} />
-        ) : null}
-        {activePage === "scenarios" ? (
-          <ProductWorkflowPanels pollutant={pollutant} timestamp={timestamp} summary={summary} sections={["scenarios"]} />
-        ) : null}
-        {activePage === "insights" ? (
-          <ProductWorkflowPanels pollutant={pollutant} timestamp={timestamp} summary={summary} sections={["insights"]} />
-        ) : null}
-        {activePage === "settings" ? (
-          <ProductWorkflowPanels pollutant={pollutant} timestamp={timestamp} summary={summary} sections={["settings"]} />
-        ) : null}
-
         {activePage === "sensors" ? <section className="panel table-panel" id="sensors">
           <div className="panel-head">
             <div>
@@ -1146,9 +1129,7 @@ function App() {
             </div>
           </article>
         </section> : null}
-        {activePage === "data-center" ? (
-          <ProductWorkflowPanels pollutant={pollutant} timestamp={timestamp} summary={summary} sections={["settings"]} />
-        ) : null}
+        {activePage === "data-center" ? <OperationsPanel summary={summary} /> : null}
           </>
         )}
           </>

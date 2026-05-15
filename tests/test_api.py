@@ -256,18 +256,6 @@ def test_sources_contract(monkeypatch) -> None:
     assert response.json()["sources"][0]["source_id"] == "osm_green"
 
 
-def test_forecast_contract(monkeypatch) -> None:
-    monkeypatch.setattr(api_main, "get_twin_service", lambda: FakeTwinService())
-    client = TestClient(api_main.app)
-
-    response = client.get("/api/forecast?pollutant=pm10&timestamp=2026-01-01T10:01:00")
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert [window["minutes"] for window in payload["windows"]] == [30, 60, 180]
-    assert payload["method"]
-
-
 def test_frontend_routes_serve_built_assets(monkeypatch, tmp_path) -> None:
     dist_dir = tmp_path / "dist"
     assets_dir = dist_dir / "assets"
@@ -294,65 +282,30 @@ def test_frontend_routes_serve_built_assets(monkeypatch, tmp_path) -> None:
     assert "demo app" in spa_response.text
 
 
-def test_scenario_run_contract(monkeypatch, tmp_path) -> None:
+def test_health_contract(monkeypatch, tmp_path) -> None:
     settings = isolated_settings(tmp_path)
     monkeypatch.setattr(api_main, "load_settings", lambda: settings)
     monkeypatch.setattr(api_main, "get_twin_service", lambda: FakeTwinService())
     client = TestClient(api_main.app)
 
-    response = client.post(
-        "/api/scenarios/run",
-        json={"scenario_type": "traffic_increase", "pollutant": "pm10", "timestamp": "2026-01-01T10:01:00", "intensity": 1},
-    )
-
-    assert response.status_code == 201
-    payload = response.json()
-    assert payload["output"]["delta_mean"] > 0
-
-    runs = client.get("/api/scenarios/runs")
-    assert runs.status_code == 200
-    assert runs.json()["runs"]
-
-    catalog = client.get("/api/scenarios/catalog")
-    assert catalog.status_code == 200
-    assert catalog.json()["scenarios"][0]["effects"]
-
-    invalid = client.post(
-        "/api/scenarios/run",
-        json={"scenario_type": "unknown", "pollutant": "pm10", "timestamp": "2026-01-01T10:01:00", "intensity": 1},
-    )
-    assert invalid.status_code == 422
-
-
-def test_decision_support_and_health_contract(monkeypatch, tmp_path) -> None:
-    settings = isolated_settings(tmp_path)
-    monkeypatch.setattr(api_main, "load_settings", lambda: settings)
-    monkeypatch.setattr(api_main, "get_twin_service", lambda: FakeTwinService())
-    client = TestClient(api_main.app)
-
-    decision = client.get("/api/decision-support?pollutant=pm10&timestamp=2026-01-01T10:01:00")
     health = client.get("/api/ops/health")
 
-    assert decision.status_code == 200
-    assert decision.json()["what_to_do_now"]
     assert health.status_code == 200
     assert health.json()["services"][0]["name"] == "API"
 
 
-def test_twin_core_contracts(monkeypatch, tmp_path) -> None:
-    settings = isolated_settings(tmp_path)
-    monkeypatch.setattr(api_main, "load_settings", lambda: settings)
-    monkeypatch.setattr(api_main, "get_twin_service", lambda: FakeTwinService())
+def test_removed_productized_endpoints_return_404() -> None:
     client = TestClient(api_main.app)
+    removed_routes = [
+        "/api/forecast?pollutant=pm10",
+        "/api/decision-support?pollutant=pm10",
+        "/api/scenarios/catalog",
+        "/api/scenarios/runs",
+        "/api/twin/assets",
+        "/api/twin/state?pollutant=pm10",
+        "/api/twin/validation?pollutant=pm10",
+    ]
 
-    assets = client.get("/api/twin/assets")
-    state = client.get("/api/twin/state?pollutant=pm10&timestamp=2026-01-01T10:01:00")
-    validation = client.get("/api/twin/validation?pollutant=pm10&timestamp=2026-01-01T10:00:00")
-
-    assert assets.status_code == 200
-    assert assets.json()["counts"]["sensor"] == 1
-    assert state.status_code == 200
-    assert state.json()["state_id"] == "pm10:2026-01-01T10:01:00"
-    assert state.json()["entities"]["sensors"][0]["sensor_id"] == "A"
-    assert validation.status_code == 200
-    assert "windows" in validation.json()
+    for route in removed_routes:
+        response = client.get(route)
+        assert response.status_code == 404

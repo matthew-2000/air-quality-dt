@@ -86,18 +86,6 @@ JOB_RUN_COLUMNS = [
     "error",
 ]
 
-SCENARIO_RUN_COLUMNS = [
-    "run_id",
-    "name",
-    "scenario_type",
-    "pollutant",
-    "intensity",
-    "created_at",
-    "baseline_timestamp",
-    "parameters",
-    "output",
-]
-
 _SCHEMA_LOCK = Lock()
 _INITIALIZED_DATABASES: set[str] = set()
 
@@ -276,21 +264,6 @@ def ensure_schema(settings: Settings) -> None:
 
                 CREATE INDEX IF NOT EXISTS idx_job_runs_started_at
                 ON job_runs (started_at DESC);
-
-                CREATE TABLE IF NOT EXISTS scenario_runs (
-                    run_id TEXT PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    scenario_type TEXT NOT NULL,
-                    pollutant TEXT NOT NULL,
-                    intensity REAL NOT NULL,
-                    created_at TEXT NOT NULL,
-                    baseline_timestamp TEXT,
-                    parameters TEXT NOT NULL DEFAULT '{}',
-                    output TEXT NOT NULL DEFAULT '{}'
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_scenario_runs_created_at
-                ON scenario_runs (created_at DESC);
                 """
             )
             connection.execute(
@@ -616,45 +589,6 @@ def read_job_runs(settings: Settings, limit: int = 20) -> list[dict[str, Any]]:
             [limit],
         ).fetchall()
     return [_job_row_to_dict(row) for row in rows]
-
-
-def write_scenario_run(settings: Settings, run: dict[str, Any]) -> None:
-    ensure_schema(settings)
-    payload = dict(run)
-    payload["parameters"] = json.dumps(payload.get("parameters") or {}, ensure_ascii=False)
-    payload["output"] = json.dumps(payload.get("output") or {}, ensure_ascii=False)
-    frame = _normalize_frame(pd.DataFrame([payload]), SCENARIO_RUN_COLUMNS)
-    with connect_db(settings) as connection:
-        row = tuple(frame.iloc[0].tolist())
-        placeholders = ",".join(["?"] * len(SCENARIO_RUN_COLUMNS))
-        updates = ",".join(f"{column}=excluded.{column}" for column in SCENARIO_RUN_COLUMNS if column != "run_id")
-        connection.execute(
-            f"""
-            INSERT INTO scenario_runs ({','.join(SCENARIO_RUN_COLUMNS)}) VALUES ({placeholders})
-            ON CONFLICT(run_id) DO UPDATE SET {updates}
-            """,
-            row,
-        )
-
-
-def _scenario_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
-    payload = dict(row)
-    for key in ["parameters", "output"]:
-        try:
-            payload[key] = json.loads(payload.get(key) or "{}")
-        except json.JSONDecodeError:
-            payload[key] = {}
-    return payload
-
-
-def read_scenario_runs(settings: Settings, limit: int = 20) -> list[dict[str, Any]]:
-    ensure_schema(settings)
-    with connect_db(settings) as connection:
-        rows = connection.execute(
-            "SELECT * FROM scenario_runs ORDER BY created_at DESC LIMIT ?",
-            [limit],
-        ).fetchall()
-    return [_scenario_row_to_dict(row) for row in rows]
 
 
 def write_ingestion_run(settings: Settings, metadata: dict[str, Any], status: str = "completed") -> None:

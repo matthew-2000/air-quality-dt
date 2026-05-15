@@ -147,15 +147,6 @@ def summarize_by_zone(values: pd.DataFrame, value_column: str = "estimated_value
     return summary
 
 
-def zone_delta_summary(scenario_values: pd.DataFrame) -> pd.DataFrame:
-    if scenario_values.empty or "delta" not in scenario_values.columns:
-        return pd.DataFrame()
-    summary = summarize_by_zone(scenario_values, "delta").rename(
-        columns={"mean_value": "mean_delta", "max_value": "max_delta", "min_value": "min_delta"}
-    )
-    return summary
-
-
 def color_zone_geojson(zone_geojson: dict, zone_values: pd.DataFrame, value_column: str) -> dict:
     if not zone_geojson:
         return zone_geojson

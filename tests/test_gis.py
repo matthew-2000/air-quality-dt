@@ -7,8 +7,8 @@ from unisa_air_twin.gis import (
     build_reliability_grid,
     color_zone_geojson,
     sensor_snapshot,
+    summarize_by_zone,
     timestamp_window,
-    zone_delta_summary,
 )
 
 
@@ -50,16 +50,16 @@ def test_reliability_grid_is_bounded() -> None:
     assert grid["reliability"].between(0.0, 1.0).all()
 
 
-def test_zone_delta_summary_and_geojson_coloring() -> None:
-    scenario = pd.DataFrame(
+def test_zone_summary_and_geojson_coloring() -> None:
+    observations = pd.DataFrame(
         [
-            {"sensor_id": "a", "zone": "mobilita", "delta": -2.0},
-            {"sensor_id": "b", "zone": "mobilita", "delta": -1.0},
-            {"sensor_id": "c", "zone": "verde", "delta": 0.5},
+            {"sensor_id": "a", "zone": "mobilita", "estimated_value": 10.0},
+            {"sensor_id": "b", "zone": "mobilita", "estimated_value": 14.0},
+            {"sensor_id": "c", "zone": "verde", "estimated_value": 8.0},
         ]
     )
-    summary = zone_delta_summary(scenario)
-    assert summary.loc[summary["zone"] == "mobilita", "mean_delta"].iloc[0] == -1.5
+    summary = summarize_by_zone(observations)
+    assert summary.loc[summary["zone"] == "mobilita", "mean_value"].iloc[0] == 12.0
     geojson = {
         "type": "FeatureCollection",
         "features": [
@@ -67,7 +67,7 @@ def test_zone_delta_summary_and_geojson_coloring() -> None:
             {"type": "Feature", "geometry": None, "properties": {"zone": "verde"}},
         ],
     }
-    colored = color_zone_geojson(geojson, summary, "mean_delta")
+    colored = color_zone_geojson(geojson, summary, "mean_value")
     assert all("fill_color" in feature["properties"] for feature in colored["features"])
 
 
