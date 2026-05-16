@@ -8,6 +8,7 @@ import os
 from typing import Any
 
 from unisa_air_twin.config import Settings
+from unisa_air_twin.event_contract import OperationalEventEnvelope
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ def redis_enabled(settings: Settings) -> bool:
     return redis_url(settings) is not None
 
 
-def publish_realtime_notification(settings: Settings, event_type: str, payload: dict[str, Any]) -> None:
+def publish_realtime_notification(settings: Settings, envelope: OperationalEventEnvelope | dict[str, Any]) -> None:
     url = redis_url(settings)
     if not url:
         return
@@ -47,7 +48,8 @@ def publish_realtime_notification(settings: Settings, event_type: str, payload: 
         logger.warning("Redis realtime notification requested but `redis` package is unavailable.")
         return
 
-    message = json.dumps({"event_type": event_type, "payload": payload}, ensure_ascii=False)
+    message_payload = envelope.to_record() if isinstance(envelope, OperationalEventEnvelope) else envelope
+    message = json.dumps(message_payload, ensure_ascii=False)
     try:
         client = redis.Redis.from_url(url, decode_responses=True)
         client.publish(redis_channel(settings), message)

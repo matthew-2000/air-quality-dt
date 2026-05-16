@@ -42,6 +42,13 @@ def run_projector_loop(settings: Settings) -> None:
             result = run_projection_cycle(settings)
             if result.get("observation_changes"):
                 logger.info("Projected %s events into %s snapshot rows", result.get("projected_events"), result.get("snapshot_rows"))
+            if result.get("retrying_events") or result.get("dlq_events"):
+                logger.warning(
+                    "Projection worker issues: retrying=%s dlq=%s blocked_event_id=%s",
+                    result.get("retrying_events"),
+                    result.get("dlq_events"),
+                    result.get("blocked_event_id"),
+                )
         except Exception:
             logger.exception("Projection worker cycle failed")
         time.sleep(interval)

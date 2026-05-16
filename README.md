@@ -230,15 +230,60 @@ Il sistema ora registra eventi persistenti nello store operativo:
 - `observations.replaced`
 - `snapshots.materialized`
 
+Ogni evento usa ora envelope versionato bus-ready con campi minimi:
+
+- `event_name`
+- `topic`
+- `schema_version`
+- `producer`
+- `occurred_at`
+- `aggregate_type`
+- `aggregate_id`
+- `partition_key`
+- `payload`
+
+Topic logici attuali:
+
+- `aqdt.observations`
+- `aqdt.snapshots`
+- `aqdt.dlq`
+
+Backend bus attuale selezionabile:
+
+- `store` default: projector legge da event log persistito locale
+- `kafka` opzionale: fan-out producer + consumer seam Kafka/Redpanda-ready
+
 Le proiezioni operative (`observations`, `operational_snapshots`) vengono ora materializzate da projector interno che consuma questo event log.
 
 Questo rende il refresh realtime meno dipendente da memoria locale del processo API, abilita replay, e prepara passaggio successivo verso bus esterno (`Redis` / `Kafka` / `Redpanda`).
+
+Il projector ora applica anche policy minima di resilienza:
+
+- retry persistito per singolo `event_id`
+- stop del cursore su errore retriable
+- parking in DLQ locale dopo superamento `UNISA_AQDT_PROJECTOR_MAX_RETRIES`
+- health summary con conteggi `retrying` e `dead_lettered`
 
 Se `UNISA_AQDT_REDIS_URL` e' configurato:
 
 - il projector pubblica notifiche realtime su Redis;
 - l'API si sottoscrive al canale e sveglia subito lo stream SSE;
 - piu' istanze API possono reagire allo stesso aggiornamento.
+
+Se vuoi preparare backend bus esterno:
+
+```dotenv
+UNISA_AQDT_EVENT_BUS_BACKEND=kafka
+UNISA_AQDT_KAFKA_BOOTSTRAP_SERVERS=localhost:9092
+UNISA_AQDT_KAFKA_CONSUMER_GROUP=aqdt-projector
+UNISA_AQDT_KAFKA_POLL_TIMEOUT_MS=1000
+```
+
+Per backend `kafka` serve dipendenza opzionale:
+
+```bash
+pip install '.[kafka]'
+```
 
 ## Output principali
 

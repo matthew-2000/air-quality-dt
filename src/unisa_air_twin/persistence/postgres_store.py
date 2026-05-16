@@ -565,6 +565,129 @@ def read_latest_event_id(settings: Settings) -> int:
     return int((row or {}).get("event_id") or 0)
 
 
+def _projection_failure_row_to_dict(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    payload = dict(row)
+    try:
+        payload["payload"] = json.loads(payload.get("payload") or "{}")
+    except json.JSONDecodeError:
+        payload["payload"] = {}
+    return payload
+
+
+def upsert_projection_failure(settings: Settings, failure: dict[str, Any]) -> None:
+    ensure_schema(settings)
+    with connect_db(settings) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                INSERT INTO {_table(settings, 'projection_failures')} (
+                    event_id,
+                    event_type,
+                    topic,
+                    aggregate_id,
+                    failed_at,
+                    last_attempt_at,
+                    retry_count,
+                    status,
+                    error,
+                    payload
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (event_id) DO UPDATE SET
+                    event_type = EXCLUDED.event_type,
+                    topic = EXCLUDED.topic,
+                    aggregate_id = EXCLUDED.aggregate_id,
+                    failed_at = EXCLUDED.failed_at,
+                    last_attempt_at = EXCLUDED.last_attempt_at,
+                    retry_count = EXCLUDED.retry_count,
+                    status = EXCLUDED.status,
+                    error = EXCLUDED.error,
+                    payload = EXCLUDED.payload
+                """,
+                [
+                    int(failure.get("event_id") or 0),
+                    str(failure.get("event_type") or ""),
+                    str(failure.get("topic") or ""),
+                    str(failure.get("aggregate_id") or ""),
+                    str(failure.get("failed_at") or ""),
+                    str(failure.get("last_attempt_at") or ""),
+                    int(failure.get("retry_count") or 0),
+                    str(failure.get("status") or "retrying"),
+                    str(failure.get("error") or ""),
+                    json.dumps(failure.get("payload") or {}, ensure_ascii=False),
+                ],
+            )
+        connection.commit()
+
+
+def read_projection_failure(settings: Settings, event_id: int) -> dict[str, Any] | None:
+    ensure_schema(settings)
+    with connect_db(settings) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"SELECT * FROM {_table(settings, 'projection_failures')} WHERE event_id = %s",
+                [int(event_id)],
+            )
+            row = cursor.fetchone()
+    return _projection_failure_row_to_dict(row)
+
+
+def delete_projection_failure(settings: Settings, event_id: int) -> None:
+    ensure_schema(settings)
+    with connect_db(settings) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"DELETE FROM {_table(settings, 'projection_failures')} WHERE event_id = %s",
+                [int(event_id)],
+            )
+        connection.commit()
+
+
+def read_projection_failures(
+    settings: Settings,
+    *,
+    status: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    ensure_schema(settings)
+    query = f"SELECT * FROM {_table(settings, 'projection_failures')}"
+    params: list[Any] = []
+    if status:
+        query += " WHERE status = %s"
+        params.append(status)
+    query += " ORDER BY last_attempt_at DESC LIMIT %s"
+    params.append(max(limit, 1))
+    with connect_db(settings) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+    return [_projection_failure_row_to_dict(row) or {} for row in rows]
+
+
+def read_projection_failure_summary(settings: Settings) -> dict[str, Any]:
+    ensure_schema(settings)
+    with connect_db(settings) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT status, COUNT(*) AS total, MAX(last_attempt_at) AS last_attempt_at
+                FROM {_table(settings, 'projection_failures')}
+                GROUP BY status
+                """
+            )
+            rows = cursor.fetchall()
+    counts = {str(row["status"]): int(row["total"] or 0) for row in rows}
+    latest_attempt = max((str(row["last_attempt_at"] or "") for row in rows), default="") or None
+    return {
+        "active": sum(counts.values()),
+        "retrying": counts.get("retrying", 0),
+        "dead_lettered": counts.get("dead_lettered", 0),
+        "last_attempt_at": latest_attempt,
+    }
+
+
 class PostgresOperationalStore(OperationalStore):
     def backend_name(self) -> str:
         return "postgres"
@@ -674,3 +797,24 @@ class PostgresOperationalStore(OperationalStore):
 
     def read_latest_event_id(self, settings: Settings) -> int:
         return read_latest_event_id(settings)
+
+    def upsert_projection_failure(self, settings: Settings, failure: dict[str, Any]) -> None:
+        upsert_projection_failure(settings, failure)
+
+    def read_projection_failure(self, settings: Settings, event_id: int) -> dict[str, Any] | None:
+        return read_projection_failure(settings, event_id)
+
+    def delete_projection_failure(self, settings: Settings, event_id: int) -> None:
+        delete_projection_failure(settings, event_id)
+
+    def read_projection_failures(
+        self,
+        settings: Settings,
+        *,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        return read_projection_failures(settings, status=status, limit=limit)
+
+    def read_projection_failure_summary(self, settings: Settings) -> dict[str, Any]:
+        return read_projection_failure_summary(settings)

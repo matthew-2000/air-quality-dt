@@ -25,6 +25,7 @@ from unisa_air_twin.ingestion import build_operational_snapshots, load_sensor_ca
 from unisa_air_twin.operational_store import (
     read_metadata,
     read_observations,
+    read_projection_failure_summary,
     read_raw_message_count,
     read_sensor_observations,
     read_sensor_snapshot,
@@ -211,6 +212,7 @@ class TwinDataService:
         ingestion = data["ingestion_summary"]
         live_feed = live_feed_status(self.settings, latest_received)
         sensor_health = self._sensor_health(data["sensors"], data["observations"])
+        projection_failures = read_projection_failure_summary(self.settings)
         coverage_by_pollutant: list[dict[str, Any]] = []
         for pollutant in ordered:
             pollutant_snapshot = (
@@ -261,6 +263,7 @@ class TwinDataService:
             "layer_counts": layer_counts,
             "ingestion": ingestion,
             "live_feed": live_feed,
+            "projection_failures": projection_failures,
             "data_sources": ingestion.get("sources") if isinstance(ingestion.get("sources"), list) else read_source_statuses(self.settings),
             "warnings": data["warnings"],
             "mode": "real_only",

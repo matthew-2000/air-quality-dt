@@ -143,3 +143,28 @@ def read_operational_events(
 
 def read_latest_event_id(settings: Settings) -> int:
     return get_operational_store(settings).read_latest_event_id(settings)
+
+
+def upsert_projection_failure(settings: Settings, failure: dict[str, Any]) -> None:
+    get_operational_store(settings).upsert_projection_failure(settings, failure)
+
+
+def read_projection_failure(settings: Settings, event_id: int) -> dict[str, Any] | None:
+    return get_operational_store(settings).read_projection_failure(settings, event_id)
+
+
+def delete_projection_failure(settings: Settings, event_id: int) -> None:
+    get_operational_store(settings).delete_projection_failure(settings, event_id)
+
+
+def read_projection_failures(
+    settings: Settings,
+    *,
+    status: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    return get_operational_store(settings).read_projection_failures(settings, status=status, limit=limit)
+
+
+def read_projection_failure_summary(settings: Settings) -> dict[str, Any]:
+    return get_operational_store(settings).read_projection_failure_summary(settings)

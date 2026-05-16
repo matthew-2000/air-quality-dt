@@ -60,3 +60,40 @@ class OperationalStore(Protocol):
     def write_metadata(self, settings: Settings, key: str, value: Any) -> None: ...
 
     def read_metadata(self, settings: Settings) -> dict[str, Any]: ...
+
+    def append_operational_event(
+        self,
+        settings: Settings,
+        event_type: str,
+        payload: dict[str, Any],
+        *,
+        aggregate_type: str | None = None,
+        aggregate_id: str | None = None,
+        occurred_at: str | None = None,
+    ) -> int: ...
+
+    def read_operational_events(
+        self,
+        settings: Settings,
+        *,
+        after_event_id: int = 0,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]: ...
+
+    def read_latest_event_id(self, settings: Settings) -> int: ...
+
+    def upsert_projection_failure(self, settings: Settings, failure: dict[str, Any]) -> None: ...
+
+    def read_projection_failure(self, settings: Settings, event_id: int) -> dict[str, Any] | None: ...
+
+    def delete_projection_failure(self, settings: Settings, event_id: int) -> None: ...
+
+    def read_projection_failures(
+        self,
+        settings: Settings,
+        *,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]: ...
+
+    def read_projection_failure_summary(self, settings: Settings) -> dict[str, Any]: ...

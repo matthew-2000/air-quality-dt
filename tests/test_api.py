@@ -282,6 +282,7 @@ def test_health_contract(monkeypatch, tmp_path) -> None:
 
     assert health.status_code == 200
     assert health.json()["services"][0]["name"] == "API"
+    assert any(service["name"] == "Projector" for service in health.json()["services"])
 
 
 def test_removed_productized_endpoints_return_404() -> None:

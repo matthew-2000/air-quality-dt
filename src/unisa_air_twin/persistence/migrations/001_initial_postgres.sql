@@ -141,6 +141,22 @@ CREATE TABLE IF NOT EXISTS "__AQDT_SCHEMA__".operational_events (
 CREATE INDEX IF NOT EXISTS idx_operational_events_type_id
 ON "__AQDT_SCHEMA__".operational_events (event_type, event_id DESC);
 
+CREATE TABLE IF NOT EXISTS "__AQDT_SCHEMA__".projection_failures (
+    event_id BIGINT PRIMARY KEY,
+    event_type TEXT NOT NULL,
+    topic TEXT,
+    aggregate_id TEXT,
+    failed_at TEXT NOT NULL,
+    last_attempt_at TEXT NOT NULL,
+    retry_count INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL,
+    error TEXT,
+    payload TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE INDEX IF NOT EXISTS idx_projection_failures_status_attempt
+ON "__AQDT_SCHEMA__".projection_failures (status, last_attempt_at DESC);
+
 CREATE TABLE IF NOT EXISTS "__AQDT_SCHEMA__".job_runs (
     job_id TEXT PRIMARY KEY,
     name TEXT NOT NULL,

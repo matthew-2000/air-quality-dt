@@ -64,17 +64,42 @@ Controlli ingest:
 - `UNISA_AQDT_AUTO_PROJECTOR=true|false`
 - `UNISA_AQDT_PROJECTOR_INTERVAL=2`
 - `UNISA_AQDT_PROJECTOR_BATCH_SIZE=500`
+- `UNISA_AQDT_PROJECTOR_MAX_RETRIES=3`
+- `UNISA_AQDT_EVENT_BUS_BACKEND=store|kafka`
+- `UNISA_AQDT_KAFKA_BOOTSTRAP_SERVERS=localhost:9092`
+- `UNISA_AQDT_KAFKA_CONSUMER_GROUP=aqdt-projector`
+- `UNISA_AQDT_KAFKA_POLL_TIMEOUT_MS=1000`
 - `UNISA_AQDT_REDIS_URL=redis://...`
 - `UNISA_AQDT_REDIS_CHANNEL=aqdt:snapshots`
 
 Flusso runtime:
 
 1. ingest ascolta MQTT;
-2. salva raw messages e pubblica eventi osservazione;
-3. projector consuma event log e materializza `observations` e `operational_snapshots`;
-4. projector pubblica notifica realtime;
-5. API riceve notifica Redis o rileva cambio persistito;
-6. dashboard riceve update via SSE.
+2. salva raw messages e pubblica envelope eventi osservazione versionati nello store operativo;
+3. event bus selector usa backend `store` o `kafka` per esporre stream consumabile;
+4. projector consuma stream eventi per topic logico e materializza `observations` e `operational_snapshots`;
+5. projector pubblica notifica realtime envelope `snapshots.materialized`;
+6. API riceve notifica Redis o rileva cambio persistito;
+7. dashboard riceve update via SSE.
+
+Contratto minimo evento:
+
+- `event_name`
+- `topic`
+- `schema_version`
+- `producer`
+- `occurred_at`
+- `aggregate_type`
+- `aggregate_id`
+- `partition_key`
+- `payload`
+
+Policy projector:
+
+- errore retriable: evento resta davanti al cursore, retry count persistito
+- poison event: dopo `UNISA_AQDT_PROJECTOR_MAX_RETRIES` viene parcheggiato in DLQ locale
+- audit DLQ: evento `projection.dead_lettered` su topic `aqdt.dlq`
+- health operativo: servizio `Projector` mostra retry e DLQ attivi
 
 ## Release Gate
 
@@ -125,3 +150,4 @@ Nota: non esiste ancora un job automatico di backup/retention. La dashboard most
 - Fonti esterne fallite: usa **Arricchisci fonti**; se rete assente, cache esistente resta utilizzabile.
 - Export vuoto: verifica osservazioni e raw messages in **Data Center**.
 - Stream non aggiornato tra processi: verifica `UNISA_AQDT_REDIS_URL`, stato Redis e worker `projector`.
+- Projector bloccato: controlla `GET /api/ops/health`, poi summary `projection_failures` e valore `UNISA_AQDT_PROJECTOR_MAX_RETRIES`.

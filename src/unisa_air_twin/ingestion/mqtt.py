@@ -9,6 +9,7 @@ from typing import Any
 import pandas as pd
 
 from unisa_air_twin.config import Settings
+from unisa_air_twin.event_contract import OBSERVATIONS_UPSERTED
 from unisa_air_twin.event_log import publish_operational_event
 from unisa_air_twin.external_sources import load_external_context
 from unisa_air_twin.ingestion.normalization import _normalize_payload_record, _sensor_lookup
@@ -84,7 +85,7 @@ def collect_mqtt_messages(settings: Settings, duration_seconds: int = 60, max_me
             if normalized_rows:
                 publish_operational_event(
                     settings,
-                    "observations.upserted",
+                    OBSERVATIONS_UPSERTED,
                     {
                         "rows": len(normalized_rows),
                         "topic": message.topic,
@@ -92,6 +93,7 @@ def collect_mqtt_messages(settings: Settings, duration_seconds: int = 60, max_me
                         "sensor_id": str(payload.get("ID") or message.topic or ""),
                         "observations": _frame_event_records(pd.DataFrame(normalized_rows)),
                     },
+                    producer="ingestion.mqtt",
                     aggregate_type="sensor",
                     aggregate_id=str(payload.get("ID") or message.topic or ""),
                     occurred_at=row["timestamp"],

@@ -4,6 +4,11 @@ import asyncio
 
 from api.events import SnapshotEventBus
 from unisa_air_twin.config import load_settings
+from unisa_air_twin.event_contract import (
+    OBSERVATIONS_UPSERTED,
+    SNAPSHOTS_MATERIALIZED,
+    parse_operational_event,
+)
 from unisa_air_twin.operational_store import (
     append_operational_event,
     read_latest_event_id,
@@ -26,16 +31,36 @@ def test_operational_event_log_persists_append_only_events(tmp_path) -> None:
 
     first_id = append_operational_event(
         settings,
-        "observations.upserted",
-        {"rows": 2, "sensor_id": "A"},
+        OBSERVATIONS_UPSERTED,
+        {
+            "event_name": OBSERVATIONS_UPSERTED,
+            "topic": "aqdt.observations",
+            "schema_version": 1,
+            "producer": "test",
+            "occurred_at": "2026-05-16T10:00:00",
+            "aggregate_type": "sensor",
+            "aggregate_id": "A",
+            "partition_key": "A",
+            "payload": {"rows": 2, "sensor_id": "A"},
+        },
         aggregate_type="sensor",
         aggregate_id="A",
         occurred_at="2026-05-16T10:00:00",
     )
     second_id = append_operational_event(
         settings,
-        "snapshots.materialized",
-        {"snapshot_rows": 4},
+        SNAPSHOTS_MATERIALIZED,
+        {
+            "event_name": SNAPSHOTS_MATERIALIZED,
+            "topic": "aqdt.snapshots",
+            "schema_version": 1,
+            "producer": "test",
+            "occurred_at": "2026-05-16T10:01:00",
+            "aggregate_type": "snapshot_projection",
+            "aggregate_id": "2026-05-16T10:01:00",
+            "partition_key": "2026-05-16T10:01:00",
+            "payload": {"snapshot_rows": 4},
+        },
         aggregate_type="snapshot_projection",
         aggregate_id="2026-05-16T10:01:00",
         occurred_at="2026-05-16T10:01:00",
@@ -46,10 +71,12 @@ def test_operational_event_log_persists_append_only_events(tmp_path) -> None:
 
     events = read_operational_events(settings, after_event_id=first_id - 1, limit=10)
     assert [event["event_type"] for event in events] == [
-        "observations.upserted",
-        "snapshots.materialized",
+        OBSERVATIONS_UPSERTED,
+        SNAPSHOTS_MATERIALIZED,
     ]
-    assert events[0]["payload"]["rows"] == 2
+    envelope = parse_operational_event(events[0])
+    assert envelope.topic == "aqdt.observations"
+    assert envelope.payload["rows"] == 2
 
 
 def test_snapshot_event_bus_observes_persisted_event_versions(tmp_path) -> None:

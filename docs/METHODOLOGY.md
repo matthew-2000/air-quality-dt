@@ -97,6 +97,15 @@ Il runtime usa stream SSE:
 
 Questo modello evita il polling fisso come meccanica primaria della UI. La connessione SSE resta aperta con heartbeat, mentre i cambi reali arrivano da notifiche del projector o dalla verifica del versionamento persistito.
 
+## Retry e DLQ
+
+Il projector applica una policy minima per errori di consumo:
+
+- su errore retriable incrementa `retry_count` persistito per `event_id`
+- finche' evento resta retriable, cursore non avanza oltre quell'evento
+- al superamento soglia `UNISA_AQDT_PROJECTOR_MAX_RETRIES`, evento viene parcheggiato in DLQ locale
+- il sistema registra anche `projection.dead_lettered` per audit e observability di base
+
 ## Limiti
 
 - MQTT non offre da solo uno storico completo.

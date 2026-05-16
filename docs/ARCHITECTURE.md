@@ -37,7 +37,6 @@ This is right step for current repo size. Full microservices now would add ops c
    - no authN/authZ
    - no distributed tracing
    - no metrics pipeline
-   - no retry/DLQ policy
    - no backup/restore automation
 
 ### Dead or misleading components
@@ -69,6 +68,9 @@ This is right step for current repo size. Full microservices now would add ops c
 - introduced durable operational event log in persistence adapters
 - introduced internal projection updater with replay from append-only event log
 - introduced optional Redis pub/sub bridge between worker projector and API instances
+- introduced versioned event envelope with logical topics and producer metadata
+- introduced persisted retry/DLQ policy for projector consumer path
+- introduced `EventStreamConsumer` / external bus publisher seam with `store` default backend and optional Kafka adapter
 - removed legacy compatibility modules:
   - `src/unisa_air_twin/live_sensors.py`
   - `src/unisa_air_twin/ui_data.py`
@@ -81,7 +83,7 @@ This is right step for current repo size. Full microservices now would add ops c
 - write path now split from read-model materialization
 - easier path to replace adapters later:
   - SQLite -> Postgres/PostGIS
-  - local persistent event log -> Redis/Kafka/NATS
+  - local persistent event log -> Redis/Kafka/NATS without changing producer/consumer contract
   - inline jobs -> worker services
 
 ## Current Runtime Topology
