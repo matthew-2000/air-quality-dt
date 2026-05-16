@@ -4,8 +4,6 @@ import math
 
 import pandas as pd
 
-from unisa_air_twin.config import Settings
-
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     radius = 6371.0
@@ -70,9 +68,3 @@ def estimate_spatial_uncertainty(
     score = min(1.0, 0.75 * distance_penalty + 0.25 * density_penalty)
     score = round(float(score), 3)
     return score, _confidence_label(score)
-
-
-def estimate_campus_air_quality(settings: Settings) -> pd.DataFrame:
-    from unisa_air_twin.live_sensors import build_realtime_dataset
-
-    return build_realtime_dataset(settings)

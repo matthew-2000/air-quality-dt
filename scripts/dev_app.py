@@ -28,6 +28,7 @@ def terminate_process(process: subprocess.Popen[bytes]) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the UNISA API and web cockpit together.")
     parser.add_argument("--with-ingest", action="store_true", help="Start continuous MQTT ingestion too.")
+    parser.add_argument("--with-projector", action="store_true", help="Start projection worker too.")
     parser.add_argument("--mqtt-duration", type=int, default=30, help="Seconds for each ingest watch cycle.")
     parser.add_argument("--mqtt-interval", type=int, default=5, help="Pause in seconds between ingest cycles.")
     parser.add_argument("--api-port", type=int, default=8000, help="Port for the FastAPI server.")
@@ -74,11 +75,14 @@ def main() -> None:
             str(args.mqtt_duration),
             "--interval",
             str(args.mqtt_interval),
-            "--notify-url",
-            f"http://127.0.0.1:{args.api_port}/api/events/snapshot",
         ]
         print("Starting continuous MQTT ingestion")
         processes.append(spawn_process(ingest_command, REPO_ROOT))
+
+    if args.with_projector:
+        projector_command = [sys.executable, "scripts/run_projector.py"]
+        print("Starting projection worker")
+        processes.append(spawn_process(projector_command, REPO_ROOT))
 
     def shutdown(_signum: int, _frame: object) -> None:
         for process in reversed(processes):

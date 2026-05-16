@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from unisa_air_twin.config import Settings
 from unisa_air_twin.external_sources import fetch_external_context
-from unisa_air_twin.live_sensors import (
+from unisa_air_twin.ingestion import (
     build_realtime_dataset,
     collect_mqtt_messages,
     export_operational_artifacts,
@@ -17,6 +17,7 @@ from unisa_air_twin.live_sensors import (
 )
 from unisa_air_twin.operational_store import read_job_run, read_job_runs, upsert_job_run
 from unisa_air_twin.osm import download_osm
+from unisa_air_twin.projections import project_pending_events, rebuild_projections_from_event_log
 from unisa_air_twin.zones import ensure_twin_layers
 
 JobStatus = Literal["queued", "running", "completed", "failed"]
@@ -142,10 +143,10 @@ def collect_live_and_refresh(
         duration_seconds=duration_seconds,
         max_messages=max_messages,
     )
-    snapshots = export_operational_artifacts(settings)
+    projection = project_pending_events(settings)
     return {
         "mqtt_messages": int(messages),
-        "snapshot_rows": int(len(snapshots)),
+        "snapshot_rows": int(projection["snapshot_rows"]),
     }
 
 
@@ -164,3 +165,7 @@ def collect_live_once(
         )
     finally:
         _LIVE_INGEST_LOCK.release()
+
+
+def replay_operational_projections(settings: Settings) -> dict[str, Any]:
+    return rebuild_projections_from_event_log(settings)

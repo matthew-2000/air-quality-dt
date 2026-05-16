@@ -6,7 +6,7 @@ import os
 import pandas as pd
 
 from unisa_air_twin.config import load_dotenv, load_settings
-from unisa_air_twin.live_sensors import (
+from unisa_air_twin.ingestion import (
     _local_timestamp,
     _normalize_payload_record,
     build_operational_snapshots,
@@ -16,7 +16,7 @@ from unisa_air_twin.live_sensors import (
 from unisa_air_twin.operational_store import read_snapshots
 
 
-def test_live_sensors_builds_real_sensor_rows(tmp_path) -> None:
+def test_ingestion_pipeline_builds_real_sensor_rows(tmp_path) -> None:
     raw_dir = tmp_path / "raw"
     processed_dir = tmp_path / "processed"
     raw_dir.mkdir()

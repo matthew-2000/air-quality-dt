@@ -21,10 +21,7 @@ from unisa_air_twin.gis import (
     build_reliability_grid,
     sensor_snapshot,
 )
-from unisa_air_twin.live_sensors import (
-    build_operational_snapshots,
-    load_sensor_catalog,
-)
+from unisa_air_twin.ingestion import build_operational_snapshots, load_sensor_catalog
 from unisa_air_twin.operational_store import (
     read_metadata,
     read_observations,
@@ -406,7 +403,12 @@ class TwinDataService:
         configured_order = self.settings.model.get("pollutants", [])
         if not snapshot.empty:
             snapshot["status"] = snapshot["reading_age_seconds"].map(sensor_status)
-            order_map = {pollutant: index for index, pollutant in enumerate(ordered_pollutants(snapshot["pollutant"].dropna().unique().tolist(), configured_order))}
+            order_map = {
+                pollutant: index
+                for index, pollutant in enumerate(
+                    ordered_pollutants(snapshot["pollutant"].dropna().unique().tolist(), configured_order)
+                )
+            }
             snapshot["pollutant_order"] = snapshot["pollutant"].map(lambda value: order_map.get(str(value), 999))
             snapshot = snapshot.sort_values(["pollutant_order", "pollutant"]).drop(columns=["pollutant_order"])
 

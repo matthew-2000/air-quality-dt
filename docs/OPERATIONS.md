@@ -17,11 +17,13 @@ docker compose up --build
 Servizi:
 
 - API FastAPI: `http://127.0.0.1:8000`
+- Projector worker: processo separato per materializzare proiezioni
+- Redis: bridge pub/sub realtime cross-process
 - Dashboard React: `http://127.0.0.1:5173`
 
 Compose abilita healthcheck e `restart: unless-stopped`.
 
-All'avvio API parte anche ingest MQTT automatico se le variabili `UNISA_MQTT_*` sono complete. Non serve piu' eseguire comandi dati separati per il flusso ordinario.
+All'avvio API puo' partire ingest MQTT automatico se le variabili `UNISA_MQTT_*` sono complete. Il projector gira come worker separato nel compose e aggiorna le proiezioni operative.
 
 ## Render Free
 
@@ -59,13 +61,36 @@ Controlli ingest:
 - `UNISA_AQDT_AUTO_INGEST=true|false`
 - `UNISA_AQDT_AUTO_INGEST_DURATION=30`
 - `UNISA_AQDT_AUTO_INGEST_INTERVAL=10`
+- `UNISA_AQDT_AUTO_PROJECTOR=true|false`
+- `UNISA_AQDT_PROJECTOR_INTERVAL=2`
+- `UNISA_AQDT_PROJECTOR_BATCH_SIZE=500`
+- `UNISA_AQDT_REDIS_URL=redis://...`
+- `UNISA_AQDT_REDIS_CHANNEL=aqdt:snapshots`
 
-Ogni ciclo:
+Flusso runtime:
 
-1. ascolta MQTT;
-2. salva raw messages e osservazioni normalizzate;
-3. ricostruisce snapshot operativi;
-4. aggiorna summary/dashboard via SSE.
+1. ingest ascolta MQTT;
+2. salva raw messages e pubblica eventi osservazione;
+3. projector consuma event log e materializza `observations` e `operational_snapshots`;
+4. projector pubblica notifica realtime;
+5. API riceve notifica Redis o rileva cambio persistito;
+6. dashboard riceve update via SSE.
+
+## Release Gate
+
+Prima di stage o commit esegui sempre:
+
+```bash
+ruff check .
+pytest -q
+```
+
+Se usi runtime separato in locale, verifica anche:
+
+1. `make api`
+2. `make projector`
+3. `make web`
+4. apertura dashboard e refresh live senza errori in `GET /api/ops/health`
 
 ## Health
 
@@ -99,4 +124,4 @@ Nota: non esiste ancora un job automatico di backup/retention. La dashboard most
 - Dati vecchi: verifica job `auto_ingest_mqtt`; poi usa **Aggiorna snapshot** o **Ricostruisci dataset** solo come recupero manuale.
 - Fonti esterne fallite: usa **Arricchisci fonti**; se rete assente, cache esistente resta utilizzabile.
 - Export vuoto: verifica osservazioni e raw messages in **Data Center**.
-- Scenario non eseguibile: serve almeno un timestamp baseline disponibile.
+- Stream non aggiornato tra processi: verifica `UNISA_AQDT_REDIS_URL`, stato Redis e worker `projector`.

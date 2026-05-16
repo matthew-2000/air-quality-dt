@@ -4,8 +4,8 @@ import json
 
 import pandas as pd
 
+from unisa_air_twin.application.twin_query_service import TwinDataService
 from unisa_air_twin.config import load_settings
-from unisa_air_twin.ui_data import TwinDataService
 
 
 def test_summary_read_path_does_not_rebuild_operational_artifacts(tmp_path) -> None:

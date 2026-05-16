@@ -7,9 +7,9 @@ from collections.abc import Callable
 import anyio
 
 from api.events import SnapshotEventBus
+from unisa_air_twin.application.twin_query_service import TwinDataService
 from unisa_air_twin.config import Settings
 from unisa_air_twin.product_jobs import collect_live_and_refresh, job_registry
-from unisa_air_twin.ui_data import TwinDataService
 
 logger = logging.getLogger(__name__)
 

@@ -3,7 +3,7 @@ SYSTEM_PYTHON ?= python3
 PYTHON ?= $(VENV)/bin/python
 DEV_ARGS ?=
 
-.PHONY: venv install install-web bootstrap dev api web build test lint deploy clean
+.PHONY: venv install install-web bootstrap dev api projector web build test lint deploy clean
 
 venv:
 	@if [ ! -x "$(PYTHON)" ]; then $(SYSTEM_PYTHON) -m venv $(VENV); fi
@@ -22,6 +22,9 @@ dev:
 
 api:
 	$(PYTHON) -m uvicorn api.main:app --reload
+
+projector:
+	$(PYTHON) scripts/run_projector.py
 
 web:
 	npm --prefix web run dev

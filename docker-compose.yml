@@ -10,19 +10,50 @@ services:
         required: false
     environment:
       UNISA_AQDT_AUTO_INGEST: "true"
+      UNISA_AQDT_AUTO_PROJECTOR: "false"
       UNISA_AQDT_AUTO_INGEST_DURATION: "30"
       UNISA_AQDT_AUTO_INGEST_INTERVAL: "10"
+      UNISA_AQDT_REDIS_URL: redis://redis:6379/0
     volumes:
       - ./data:/app/data
       - ./config:/app/config:ro
     ports:
       - "8000:8000"
     restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
       interval: 30s
       timeout: 5s
       retries: 3
+
+  projector:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    command: ["python", "scripts/run_projector.py"]
+    env_file:
+      - path: .env.example
+        required: true
+      - path: .env.local
+        required: false
+    environment:
+      UNISA_AQDT_AUTO_PROJECTOR: "true"
+      UNISA_AQDT_AUTO_INGEST: "false"
+      UNISA_AQDT_REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config:ro
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_started
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
 
   web:
     build:

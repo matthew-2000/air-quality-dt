@@ -6,7 +6,10 @@ import json
 import pandas as pd
 from fastapi.testclient import TestClient
 
+import api.dependencies as api_deps
 import api.main as api_main
+import api.routers.jobs as jobs_routes
+import api.routers.twin as twin_routes
 from unisa_air_twin.config import load_settings
 
 
@@ -117,7 +120,7 @@ class FakeTwinService:
 
 
 def test_summary_contract_exposes_raw_and_observation_counts(monkeypatch) -> None:
-    monkeypatch.setattr(api_main, "get_twin_service", lambda: FakeTwinService())
+    monkeypatch.setattr(api_deps, "get_twin_service", lambda: FakeTwinService())
     client = TestClient(api_main.app)
 
     response = client.get("/api/summary")
@@ -130,7 +133,7 @@ def test_summary_contract_exposes_raw_and_observation_counts(monkeypatch) -> Non
 
 
 def test_timestamps_contract(monkeypatch) -> None:
-    monkeypatch.setattr(api_main, "get_twin_service", lambda: FakeTwinService())
+    monkeypatch.setattr(api_deps, "get_twin_service", lambda: FakeTwinService())
     client = TestClient(api_main.app)
 
     response = client.get("/api/timestamps?pollutant=pm10")
@@ -140,7 +143,7 @@ def test_timestamps_contract(monkeypatch) -> None:
 
 
 def test_analytics_contract(monkeypatch) -> None:
-    monkeypatch.setattr(api_main, "get_twin_service", lambda: FakeTwinService())
+    monkeypatch.setattr(api_deps, "get_twin_service", lambda: FakeTwinService())
     client = TestClient(api_main.app)
 
     response = client.get("/api/analytics?pollutant=pm10")
@@ -149,28 +152,15 @@ def test_analytics_contract(monkeypatch) -> None:
     assert response.json()["quality"]["rows"] == 0
 
 
-def test_snapshot_event_notification_contract(monkeypatch) -> None:
-    monkeypatch.setattr(api_main, "get_twin_service", lambda: FakeTwinService())
-    client = TestClient(api_main.app)
-
-    before = api_main.snapshot_events.version
-    response = client.post("/api/events/snapshot")
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["status"] == "notified"
-    assert payload["version"] == before + 1
-
-
 def test_stream_emits_connected_event(monkeypatch) -> None:
-    monkeypatch.setattr(api_main, "get_twin_service", lambda: FakeTwinService())
+    monkeypatch.setattr(api_deps, "get_twin_service", lambda: FakeTwinService())
 
     class FakeRequest:
         async def is_disconnected(self) -> bool:
             return False
 
     async def collect_first_event() -> str:
-        stream = api_main._summary_stream(FakeRequest())
+        stream = twin_routes._summary_stream(FakeRequest())
         try:
             return await anext(stream)
         finally:
@@ -188,9 +178,9 @@ def test_stream_emits_connected_event(monkeypatch) -> None:
 
 def test_refresh_job_contract(monkeypatch, tmp_path) -> None:
     settings = isolated_settings(tmp_path)
-    monkeypatch.setattr(api_main, "load_settings", lambda: settings)
-    monkeypatch.setattr(api_main, "get_twin_service", lambda: FakeTwinService())
-    monkeypatch.setattr(api_main, "refresh_operational_snapshots", lambda _settings: {"snapshot_rows": 3})
+    monkeypatch.setattr(api_deps, "get_settings", lambda: settings)
+    monkeypatch.setattr(api_deps, "get_twin_service", lambda: FakeTwinService())
+    monkeypatch.setattr(jobs_routes, "refresh_operational_snapshots", lambda _settings: {"snapshot_rows": 3})
     client = TestClient(api_main.app)
 
     response = client.post("/api/jobs/refresh")
@@ -207,10 +197,10 @@ def test_refresh_job_contract(monkeypatch, tmp_path) -> None:
 
 def test_live_ingest_job_contract(monkeypatch, tmp_path) -> None:
     settings = isolated_settings(tmp_path)
-    monkeypatch.setattr(api_main, "load_settings", lambda: settings)
-    monkeypatch.setattr(api_main, "get_twin_service", lambda: FakeTwinService())
+    monkeypatch.setattr(api_deps, "get_settings", lambda: settings)
+    monkeypatch.setattr(api_deps, "get_twin_service", lambda: FakeTwinService())
     monkeypatch.setattr(
-        api_main,
+        jobs_routes,
         "collect_live_once",
         lambda _settings, duration_seconds, max_messages: {
             "mqtt_messages": max_messages,
@@ -233,7 +223,7 @@ def test_live_ingest_job_contract(monkeypatch, tmp_path) -> None:
 
 def test_export_observations_contract(monkeypatch) -> None:
     monkeypatch.setattr(
-        api_main,
+        twin_routes,
         "read_observations",
         lambda _settings: pd.DataFrame([{"sensor_id": "A", "pollutant": "pm10", "estimated_value": 12.5}]),
     )
@@ -247,7 +237,7 @@ def test_export_observations_contract(monkeypatch) -> None:
 
 
 def test_sources_contract(monkeypatch) -> None:
-    monkeypatch.setattr(api_main, "read_source_statuses", lambda _settings: [{"source_id": "osm_green", "status": "available"}])
+    monkeypatch.setattr(twin_routes, "read_source_statuses", lambda _settings: [{"source_id": "osm_green", "status": "available"}])
     client = TestClient(api_main.app)
 
     response = client.get("/api/sources")
@@ -265,8 +255,8 @@ def test_frontend_routes_serve_built_assets(monkeypatch, tmp_path) -> None:
     index_path.write_text("<html><body>demo app</body></html>", encoding="utf-8")
     asset_path.write_text("console.log('demo')", encoding="utf-8")
 
-    monkeypatch.setattr(api_main, "frontend_dist_dir", lambda: dist_dir)
-    monkeypatch.setattr(api_main, "frontend_index_path", lambda: index_path)
+    monkeypatch.setattr(api_deps, "frontend_dist_dir", lambda: dist_dir)
+    monkeypatch.setattr(api_deps, "frontend_index_path", lambda: index_path)
     client = TestClient(api_main.app)
 
     root_response = client.get("/")
@@ -284,8 +274,8 @@ def test_frontend_routes_serve_built_assets(monkeypatch, tmp_path) -> None:
 
 def test_health_contract(monkeypatch, tmp_path) -> None:
     settings = isolated_settings(tmp_path)
-    monkeypatch.setattr(api_main, "load_settings", lambda: settings)
-    monkeypatch.setattr(api_main, "get_twin_service", lambda: FakeTwinService())
+    monkeypatch.setattr(api_deps, "get_settings", lambda: settings)
+    monkeypatch.setattr(api_deps, "get_twin_service", lambda: FakeTwinService())
     client = TestClient(api_main.app)
 
     health = client.get("/api/ops/health")

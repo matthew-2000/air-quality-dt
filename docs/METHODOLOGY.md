@@ -12,14 +12,20 @@ La pipeline attuale e' questa:
 2. aggiornamento fonti gratuite esterne quando richiesto dalla dashboard
 3. normalizzazione dei messaggi in osservazioni sensore
 4. arricchimento con meteo, background aria, pressione traffico e verde OSM
-5. scrittura nello store operativo SQLite
-6. generazione degli artifact usati da dashboard e audit
+5. pubblicazione eventi osservazione su event log append-only
+6. materializzazione read model operativo tramite projector
+7. generazione degli artifact usati da dashboard e audit
 
 ## Store operativo
 
-La sorgente primaria del cockpit e' il database SQLite:
+La sorgente primaria del cockpit e' lo store operativo configurato:
 
-- `data/processed/realtime_operational.db`
+- `data/processed/realtime_operational.db` quando il backend attivo e' `sqlite`
+
+Backend disponibile oggi:
+
+- `sqlite` per sviluppo/demo
+- `postgres` come backend target per runtime piu' seri
 
 Contiene almeno:
 
@@ -84,11 +90,12 @@ L'endpoint `/api/analytics` restituisce qualita' complessiva, riepilogo zone, Ge
 Il runtime usa stream SSE:
 
 - l'API espone uno stream SSE che osserva lo stato dello snapshot operativo
-- l'ingestione MQTT notifica l'API dopo ogni export operativo tramite `POST /api/events/snapshot`
+- il projector pubblica notifiche realtime via Redis quando materializza nuovi snapshot
+- l'API puo' rilevare cambi anche dal versionamento persistito dell'event log
 - il frontend React si sottoscrive allo stream e ricarica i pannelli quando riceve una notifica con un nuovo fingerprint del dataset live
 - il refresh manuale resta disponibile per forzare una nuova esportazione degli artifact operativi
 
-Questo modello evita il polling fisso come meccanica primaria della UI e rimuove anche il controllo periodico breve lato stream. La connessione SSE resta aperta con heartbeat lunghi, mentre i cambi reali arrivano da notifiche esplicite dell'ingestione.
+Questo modello evita il polling fisso come meccanica primaria della UI. La connessione SSE resta aperta con heartbeat, mentre i cambi reali arrivano da notifiche del projector o dalla verifica del versionamento persistito.
 
 ## Limiti
 
